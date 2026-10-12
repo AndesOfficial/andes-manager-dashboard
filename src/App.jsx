@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   Plus, X, Search, Loader2, Home, Package, Users,
-  AlertTriangle, CheckCircle2, Clock, Repeat2, Trash2, Pencil, IndianRupee, LogOut, Lock,
+  AlertTriangle, CheckCircle2, Clock, Repeat2, Trash2, Pencil, IndianRupee, LogOut, Lock, Boxes,
 } from 'lucide-react';
+import InventoryTab from './components/Inventory/InventoryTab';
 import {
   subscribeB2b, subscribeB2c, subscribeHostels,
   addB2b, updateB2b, removeB2b,
   addB2c, updateB2c, removeB2c,
-  subscribeAuth, signIn, signOut, isAllowedUser,
+  subscribeAuth, signIn, signOut, isAllowedUser, isManagerUser,
+  fetchPriceItems,
 } from './firebase';
 
 /* ---------------- constants ---------------- */
@@ -56,10 +58,17 @@ function newB2b(hostels) {
   };
 }
 
+const newLine = () => ({
+  key: `line-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  priceId: '', name: '', unit: 'piece', rate: 0, quantity: '',
+});
+
+const lineAmount = (line) => Number((num(line.quantity) * num(line.rate)).toFixed(2));
+
 function newB2c() {
   return {
     customerName: '', date: todayStr(), pickup: todayStr(), delivery: '',
-    weight: '', services: [], orderValue: '', discount: '',
+    weight: '', services: [], lines: [newLine()], orderValue: '', discount: '',
     paymentStatus: 'Pending', delayStatus: 'On-time', refund: '', repeatCustomer: false,
     reviewStatus: 'pending', reviewNote: '',
   };
@@ -270,10 +279,24 @@ function B2BForm({ initial, onSave, onDelete, onClose, hostels, isAdmin }) {
 
 /* ---------------- B2C form ---------------- */
 
-function B2CForm({ initial, onSave, onDelete, onClose, isAdmin }) {
+function B2CForm({ initial, onSave, onDelete, onClose, isAdmin, priceItems }) {
   const isEdit = !!initial;
   const base = initial || newB2c();
+  // Orders saved before per-service lines existed keep their manual weight / value.
+  const isLegacy = isEdit && !Array.isArray(base.lines);
   const [form, setForm] = useState(base);
+
+  const lines = form.lines || [];
+  const lineTotal = useMemo(() => Number(lines.reduce((sum, l) => sum + lineAmount(l), 0).toFixed(2)), [lines]);
+  const setLine = (key, patch) => setForm((f) => ({ ...f, lines: f.lines.map((l) => (l.key === key ? { ...l, ...patch } : l)) }));
+  const pickItem = (key, priceId) => {
+    const item = priceItems.find((p) => p.id === priceId);
+    setLine(key, item
+      ? { priceId, name: item.name, unit: item.unit, rate: item.rate }
+      : { priceId: '', name: '', unit: 'piece', rate: 0 });
+  };
+  const addLine = () => setForm((f) => ({ ...f, lines: [...f.lines, newLine()] }));
+  const removeLine = (key) => setForm((f) => ({ ...f, lines: f.lines.length === 1 ? f.lines : f.lines.filter((l) => l.key !== key) }));
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -292,6 +315,22 @@ function B2CForm({ initial, onSave, onDelete, onClose, isAdmin }) {
       setError('Delivery date cannot be before pickup date.');
       return;
     }
+    let pricing = {};
+    if (!isLegacy) {
+      const valid = lines.filter((l) => l.priceId && num(l.quantity) > 0);
+      if (valid.length === 0) { setError('Add at least one service with a quantity.'); return; }
+      if (valid.length !== lines.filter((l) => l.priceId || l.quantity).length) {
+        setError('Each service line needs both a service and a quantity.');
+        return;
+      }
+      const savedLines = valid.map((l) => ({ ...l, quantity: num(l.quantity), amount: lineAmount(l) }));
+      pricing = {
+        lines: savedLines,
+        services: [...new Set(savedLines.map((l) => l.name))],
+        weight: String(Number(savedLines.filter((l) => l.unit === 'kg').reduce((s, l) => s + l.quantity, 0).toFixed(2))),
+        orderValue: String(Number(savedLines.reduce((s, l) => s + l.amount, 0).toFixed(2))),
+      };
+    }
     setSaving(true);
     try {
       const reviewFields = isAdmin ? {
@@ -301,7 +340,7 @@ function B2CForm({ initial, onSave, onDelete, onClose, isAdmin }) {
         reviewStatus: 'pending',
         reviewNote: '',
       };
-      await onSave({ ...form, customerName: form.customerName.trim(), ...reviewFields });
+      await onSave({ ...form, ...pricing, customerName: form.customerName.trim(), ...reviewFields });
     } catch (e) {
       setError('Failed to save — check your connection.');
       setSaving(false);
@@ -330,27 +369,56 @@ function B2CForm({ initial, onSave, onDelete, onClose, isAdmin }) {
         </div>
       </div>
 
-      <div className="form-row">
-        <label className="form-label">Services</label>
-        <div className="chip-row">
-          {SERVICES.map((s) => (
-            <button type="button" key={s} className={`chip ${form.services.includes(s) ? 'chip-active' : ''}`} onClick={() => toggleService(s)}>
-              {s}
-            </button>
-          ))}
+      {isLegacy ? (
+        <>
+        <div className="form-row">
+          <label className="form-label">Services</label>
+          <div className="chip-row">
+            {SERVICES.map((s) => (
+              <button type="button" key={s} className={`chip ${form.services.includes(s) ? 'chip-active' : ''}`} onClick={() => toggleService(s)}>
+                {s}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
 
-      <div className="form-row two-col">
-        <div>
-          <label className="form-label">Weight (kg)</label>
-          <input className="form-input" type="number" step="0.1" placeholder="0.0" value={form.weight} onChange={(e) => set('weight', e.target.value)} />
+        <div className="form-row two-col">
+          <div>
+            <label className="form-label">Weight (kg)</label>
+            <input className="form-input" type="number" step="0.1" placeholder="0.0" value={form.weight} onChange={(e) => set('weight', e.target.value)} />
+          </div>
+          <div>
+            <label className="form-label">Order value (₹)</label>
+            <input className="form-input" type="number" placeholder="0" value={form.orderValue} onChange={(e) => set('orderValue', e.target.value)} />
+          </div>
         </div>
-        <div>
-          <label className="form-label">Order value (₹)</label>
-          <input className="form-input" type="number" placeholder="0" value={form.orderValue} onChange={(e) => set('orderValue', e.target.value)} />
+        </>
+      ) : (
+        <div className="form-row">
+          <label className="form-label">Services</label>
+          {lines.map((line) => (
+            <div key={line.key} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
+              <select className="form-input" style={{ flex: 3 }} value={line.priceId} onChange={(e) => pickItem(line.key, e.target.value)}>
+                <option value="">{priceItems.length ? 'Choose service' : 'Loading prices…'}</option>
+                {priceItems.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name} · {fmtINR(p.rate)}/{p.unit === 'piece' ? 'pc' : p.unit}</option>
+                ))}
+              </select>
+              <input className="form-input" style={{ flex: 1, minWidth: 0 }} type="number" min="0" step={line.unit === 'kg' ? '0.1' : '1'}
+                placeholder={line.unit === 'kg' ? 'kg' : 'qty'} value={line.quantity}
+                onChange={(e) => { if (!e.target.value.startsWith('-')) setLine(line.key, { quantity: e.target.value }); }} />
+              <span style={{ flex: 1, textAlign: 'right', fontWeight: 700, fontSize: 13 }}>{fmtINR(lineAmount(line))}</span>
+              <button type="button" className="icon-btn" onClick={() => removeLine(line.key)} disabled={lines.length === 1} title="Remove service">
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+            <button type="button" className="chip" onClick={addLine}><Plus size={14} /> Add service</button>
+            <span style={{ fontWeight: 800 }}>Order value {fmtINR(lineTotal)}</span>
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="form-row two-col">
         <div>
@@ -732,6 +800,8 @@ export default function App() {
   const [modal, setModal] = useState(null);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [dataError, setDataError] = useState('');
+  const [priceItems, setPriceItems] = useState([]);
 
   /* network listener */
   useEffect(() => {
@@ -750,6 +820,8 @@ export default function App() {
   const [loginLoading, setLoginLoading] = useState(false);
 
   const isAdmin = user && isAllowedUser(user);
+  const isManager = user && isManagerUser(user);
+  const canUseApp = !!(isAdmin || isManager);
 
   /* auth listener */
   useEffect(() => {
@@ -758,6 +830,9 @@ export default function App() {
       if (u) {
         if (isAllowedUser(u)) {
           setTab('overview'); // switch to admin stats on login
+          setAuthError('');
+        } else if (isManagerUser(u)) {
+          setTab('b2b');
           setAuthError('');
         } else {
           setAuthError('This account does not have access. Sign in with an Andes admin account.');
@@ -769,8 +844,28 @@ export default function App() {
     });
   }, []);
 
-  /* real-time Firestore listeners — always load since managers are unauthenticated */
+  /* live price list for automatic order pricing */
   useEffect(() => {
+    fetchPriceItems()
+      .then(setPriceItems)
+      .catch((err) => {
+        console.error('Price list failed to load:', err);
+        setDataError('Could not load the price list. Refresh to try again.');
+      });
+  }, []);
+
+  /* real-time Firestore listeners — need a signed-in admin or manager */
+  useEffect(() => {
+    if (!canUseApp) return undefined;
+    setLoading(true);
+    setDataError('');
+    const onDataError = (err) => {
+      console.error('Dashboard listener failed:', err);
+      setDataError(err.code === 'permission-denied'
+        ? 'This account is not allowed to read orders. Ask an admin to check access.'
+        : 'Could not load orders. Check your connection and refresh.');
+      setLoading(false);
+    };
     let b2bReady = false;
     let b2cReady = false;
 
@@ -778,13 +873,13 @@ export default function App() {
       setB2b(list);
       b2bReady = true;
       if (b2cReady) setLoading(false);
-    });
+    }, onDataError);
 
     const unsubB2c = subscribeB2c((list) => {
       setB2c(list);
       b2cReady = true;
       if (b2bReady) setLoading(false);
-    });
+    }, onDataError);
 
     const timeout = setTimeout(() => setLoading(false), 3000);
     const unsubHostels = subscribeHostels((names) => setHostels(names));
@@ -795,7 +890,7 @@ export default function App() {
       unsubHostels();
       clearTimeout(timeout);
     };
-  }, []);
+  }, [canUseApp]);
 
   const handleSignIn = async (e) => {
     e.preventDefault();
@@ -877,6 +972,33 @@ export default function App() {
     );
   }
 
+  if (!canUseApp) {
+    return (
+      <div className="layout-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', padding: 16 }}>
+        <div style={{ width: '100%', maxWidth: 380, background: '#fff', borderRadius: 16, padding: 24, boxShadow: '0 10px 30px rgba(15,23,42,0.08)' }}>
+          <div className="sidebar-title" style={{ color: '#0f172a', marginBottom: 4 }}>Andes Manager Portal</div>
+          <p style={{ fontSize: 13, color: '#64748b', marginBottom: 16 }}>Sign in with the manager or admin account.</p>
+          <form onSubmit={handleSignIn} style={{ width: '100%' }}>
+            <div className="form-row">
+              <label className="form-label">Email</label>
+              <input className="form-input" type="email" placeholder="you@andes.co.in"
+                value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} autoFocus />
+            </div>
+            <div className="form-row">
+              <label className="form-label">Password</label>
+              <input className="form-input" type="password" placeholder="••••••••"
+                value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} />
+            </div>
+            {authError && <div className="form-error" style={{ textAlign: 'center', marginBottom: 10 }}>{authError}</div>}
+            <button className="btn-primary" type="submit" style={{ width: '100%' }} disabled={loginLoading}>
+              {loginLoading ? <><Loader2 size={16} className="spin" /> Signing in…</> : 'Sign in'}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="layout-container">
       
@@ -906,6 +1028,10 @@ export default function App() {
               <Users size={18} />
               <span>B2C Orders</span>
             </button>
+            <button className={`menu-item ${tab === 'inventory' ? 'active' : ''}`} onClick={() => setTab('inventory')}>
+              <Boxes size={18} />
+              <span>Inventory</span>
+            </button>
           </nav>
         </div>
 
@@ -923,10 +1049,15 @@ export default function App() {
                   </button>
                 </>
               ) : (
-                <button className="menu-item" style={{ padding: 0 }} onClick={() => setLoginModalOpen(true)}>
-                  <Lock size={18} />
-                  <span>Admin Login</span>
-                </button>
+                <>
+                  <div className="profile-info">
+                    <span className="profile-name">Manager</span>
+                    <span className="profile-role">Shared login</span>
+                  </div>
+                  <button className="icon-btn" style={{ background: 'transparent', border: 'none', color: '#94a3b8' }} onClick={handleSignOut} title="Sign out">
+                    <LogOut size={18} />
+                  </button>
+                </>
               )}
             </div>
             <div className="profile-info" style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 }}>
@@ -951,8 +1082,8 @@ export default function App() {
         {/* Desktop Header */}
         <header className="main-header">
           <div className="main-title-wrap">
-            <h1>{tab === 'overview' ? 'Dashboard Overview' : tab === 'b2b' ? 'B2B Hostels' : 'B2C Orders'}</h1>
-            <p>{b2b.length} B2B batches · {b2c.length} B2C orders total</p>
+            <h1>{tab === 'overview' ? 'Dashboard Overview' : tab === 'b2b' ? 'B2B Hostels' : tab === 'inventory' ? 'Inventory' : 'B2C Orders'}</h1>
+            <p>{tab === 'inventory' ? 'Daily stock, cleanliness, vehicle & utility log' : `${b2b.length} B2B batches · ${b2c.length} B2C orders total`}</p>
           </div>
 
           <div className="header-actions">
@@ -980,8 +1111,8 @@ export default function App() {
                 <LogOut size={16} />
               </button>
             ) : (
-              <button className="icon-btn" onClick={() => setLoginModalOpen(true)} title="Admin Login">
-                <Lock size={16} />
+              <button className="icon-btn" onClick={handleSignOut} title="Sign out">
+                <LogOut size={16} />
               </button>
             )}
           </div>
@@ -989,19 +1120,22 @@ export default function App() {
 
         {/* Mobile Navigation Tabs (Hidden on Desktop) */}
         <nav className="mobile-tabs">
-          {(isAdmin ? ['overview', 'b2b', 'b2c'] : ['b2b', 'b2c']).map((t) => (
+          {(isAdmin ? ['overview', 'b2b', 'b2c', 'inventory'] : ['b2b', 'b2c', 'inventory']).map((t) => (
             <button key={t} className={`mobile-tab-btn ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>
-              {t === 'overview' ? 'Overview' : t.toUpperCase()}
+              {t === 'overview' ? 'Overview' : t === 'inventory' ? 'Inventory' : t.toUpperCase()}
             </button>
           ))}
         </nav>
 
         {/* Active Tab Panel */}
         <div className="tab-content-panel">
+          {dataError && <div className="form-error" style={{ marginBottom: 12 }}>{dataError}</div>}
           {loading ? (
             <div className="loading-state"><Loader2 size={22} className="spin" /><span>Loading dashboard…</span></div>
           ) : tab === 'overview' ? (
             <OverviewTab b2b={b2b} b2c={b2c} />
+          ) : tab === 'inventory' ? (
+            <InventoryTab />
           ) : tab === 'b2b' ? (
             <B2BTab data={b2b} onEdit={(entry) => setModal({ type: 'b2b', entry })} onQuickProcess={quickProcessB2b} />
           ) : (
@@ -1023,7 +1157,7 @@ export default function App() {
         <B2BForm initial={modal.entry} onSave={saveB2b} onDelete={deleteB2b} onClose={() => setModal(null)} hostels={hostels} isAdmin={isAdmin} />
       )}
       {modal && modal.type === 'b2c' && (
-        <B2CForm initial={modal.entry} onSave={saveB2c} onDelete={deleteB2c} onClose={() => setModal(null)} isAdmin={isAdmin} />
+        <B2CForm initial={modal.entry} onSave={saveB2c} onDelete={deleteB2c} onClose={() => setModal(null)} isAdmin={isAdmin} priceItems={priceItems} />
       )}
 
       {loginModalOpen && (

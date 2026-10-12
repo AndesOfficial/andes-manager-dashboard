@@ -915,3 +915,53 @@ textarea.form-input { resize: vertical; min-height: 80px; }
     box-shadow: 0 8px 24px rgba(37, 99, 235, 0.3);
   }
 }
+
+/* ---- inventory ---- */
+.inv-datebar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+.inv-date-nav, .inv-save-wrap { display: flex; align-items: center; gap: 8px; }
+.inv-date { width: auto; margin: 0; }
+.inv-note { background: var(--amber-bg); border: 1px solid var(--amber-border); border-radius: 12px; padding: 10px 14px; font-size: 13px; margin-bottom: 16px; }
+.inv-widget-sub { font-size: 12px; color: var(--ink-soft); margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.inv-chips { margin-bottom: 18px; }
+.inv-section { scroll-margin-top: 16px; }
+.inv-section .panel-title { display: flex; align-items: center; gap: 6px; }
+.inv-section-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+.inv-hint { font-size: 12px; color: var(--ink-soft); }
+.inv-table { display: flex; flex-direction: column; }
+.inv-tr { display: grid; grid-template-columns: 1.6fr 0.8fr 1fr 1fr 1fr; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 10px; }
+.inv-th { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-soft); }
+.inv-tr:not(.inv-th) { border-bottom: 1px solid var(--border); }
+.inv-row-low { background: var(--amber-bg); }
+.inv-row-neg { background: var(--red-bg); }
+.inv-item { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 14px; }
+.inv-item em, .inv-sub { font-style: normal; font-size: 11px; color: var(--ink-soft); }
+.inv-num { margin: 0; padding: 9px 10px; text-align: right; }
+.inv-auto { background: var(--gray-bg); font-weight: 700; }
+.inv-manual { border-color: var(--blue); font-weight: 700; }
+.inv-static { display: block; text-align: right; font-weight: 600; color: var(--ink-soft); padding: 9px 10px; }
+.inv-units { text-align: left; font-size: 18px; color: var(--ink); background: var(--gray-bg); border-radius: 10px; }
+.inv-bad { color: var(--red); background: var(--red-bg); font-size: 14px; }
+.inv-check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+.check-tile { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; font-weight: 600; font-size: 14px; }
+.toggle-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; flex-shrink: 0; }
+.toggle-seg button { display: inline-flex; align-items: center; gap: 4px; border: none; background: #fff; padding: 8px 12px; font: inherit; font-size: 12.5px; font-weight: 600; color: var(--ink-soft); cursor: pointer; }
+.toggle-seg button + button { border-left: 1px solid var(--border); }
+.toggle-seg .on-yes { background: var(--green-bg); color: #047857; }
+.toggle-seg .on-no { background: var(--red-bg); color: var(--red); }
+.inv-history { display: flex; flex-direction: column; gap: 6px; }
+.inv-history-row { display: grid; grid-template-columns: 1.4fr 1fr 1fr auto; gap: 10px; align-items: center; text-align: left; border: 1px solid var(--border); background: #fff; border-radius: 10px; padding: 10px 14px; font: inherit; font-size: 13px; cursor: pointer; }
+.inv-history-row:hover { border-color: var(--blue); }
+.inv-history-row.active { border-color: var(--blue); background: #eff6ff; }
+.inv-mobile-save { display: none; }
+
+@media (max-width: 768px) {
+  .inv-th { display: none; }
+  .inv-tr { grid-template-columns: repeat(2, 1fr); padding: 12px; border: 1px solid var(--border); margin-bottom: 8px; }
+  .inv-item { grid-column: 1 / -1; }
+  .inv-cell::before { content: attr(data-label); display: block; font-size: 10.5px; font-weight: 700; text-transform: uppercase; color: var(--ink-soft); margin-bottom: 4px; }
+  .inv-static { text-align: left; padding-left: 0; }
+  .inv-history-row { grid-template-columns: 1fr 1fr; }
+  .inv-save-wrap .btn-action-primary { display: none; }
+  .inv-page { padding-bottom: 80px; }
+  .inv-mobile-save { display: block; position: fixed; left: 16px; right: 16px; bottom: 16px; z-index: 50; }
+}
