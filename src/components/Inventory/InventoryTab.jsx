@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  ChevronLeft, ChevronRight, Save, Loader2, AlertTriangle, Sparkles, Bike, Zap, Droplets, Check, X,
+  ChevronLeft, ChevronRight, Save, Loader2, AlertTriangle, Sparkles, Bike, Zap, Droplets, Check, X, Plus,
 } from 'lucide-react';
 import { subscribeInventoryLogs, saveInventoryLog } from '../../firebase';
+import JuteBagsSection from './JuteBagsSection';
 import { STOCK_SECTIONS, CLEANLINESS_AREAS, VEHICLES } from '../../config/inventoryItems';
 
 /* ---------------- helpers ---------------- */
@@ -85,48 +86,98 @@ function NumInput({ value, onChange, placeholder = '0', ...rest }) {
   );
 }
 
+// Stock added during the day is logged as entries via the row's + button;
+// `added` is their total.
+const addsOf = (row) => (Array.isArray(row.adds) ? row.adds : []);
+
+function StockRow({ item, row, opening, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [qty, setQty] = useState('');
+  const [note, setNote] = useState('');
+  const remaining = remainingOf(row, opening);
+  const status = stockStatus(remaining, item);
+  const adds = addsOf(row);
+  // Days saved before entries existed only have a total.
+  const legacy = adds.length === 0 && num(row.added) > 0 ? num(row.added) : 0;
+
+  const setAdds = (next) => onChange({ adds: next, added: round(next.reduce((t, e) => t + num(e.qty), 0)) });
+  const addEntry = () => {
+    if (!(num(qty) > 0)) return;
+    const base = legacy ? [{ qty: legacy, note: 'Earlier entry', at: '' }] : adds;
+    setAdds([...base, {
+      qty: num(qty), note: note.trim(),
+      at: new Date().toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' }),
+    }]);
+    setQty(''); setNote(''); setOpen(false);
+  };
+
+  return (
+    <div className={`inv-rowwrap inv-row-${status}`}>
+      <div className="inv-tr">
+        <span className="inv-item">
+          <strong>{item.label}</strong>
+          <em>{item.unit}</em>
+          {status === 'low' && <span className="badge badge-amber">Low</span>}
+          {status === 'neg' && <span className="badge badge-red">Check</span>}
+        </span>
+        <span className="inv-cell" data-label="Opening"><span className="inv-static">{opening}</span></span>
+        <span className="inv-cell" data-label="Added"><span className="inv-static">{num(row.added) > 0 ? `+${num(row.added)}` : '—'}</span></span>
+        <span className="inv-cell" data-label="Used">
+          <NumInput value={row.used} onChange={(v) => onChange({ used: v })} />
+        </span>
+        <span className="inv-cell" data-label="Remaining">
+          <NumInput
+            value={row.manual ? row.remaining : remaining}
+            className={`form-input inv-num ${row.manual ? 'inv-manual' : 'inv-auto'}`}
+            title="Auto-calculated. Type to override after a physical count."
+            onChange={(v) => onChange({ remaining: v, manual: v !== '' })}
+          />
+        </span>
+        <span className="inv-cell inv-plus-cell">
+          <button type="button" className={`inv-plus ${open ? 'open' : ''}`} onClick={() => setOpen((o) => !o)}
+            title={`Add ${item.label} stock`} aria-label={`Add ${item.label} stock`}>
+            <Plus size={16} />
+          </button>
+        </span>
+      </div>
+      {(open || adds.length > 0) && (
+        <div className="inv-adds">
+          {adds.map((e, i) => (
+            <span key={i} className="inv-add-chip">
+              +{e.qty} {item.unit}{e.note ? ` · ${e.note}` : ''}{e.at ? ` · ${e.at}` : ''}
+              <button type="button" aria-label="Remove entry" onClick={() => setAdds(adds.filter((_, j) => j !== i))}><X size={12} /></button>
+            </span>
+          ))}
+          {open && (
+            <span className="inv-add-form">
+              <NumInput value={qty} onChange={setQty} placeholder={`Qty (${item.unit})`} autoFocus
+                onKeyDown={(e) => e.key === 'Enter' && addEntry()} />
+              <input className="form-input" value={note} placeholder="Note (optional)" onChange={(e) => setNote(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && addEntry()} />
+              <button type="button" className="btn-action-primary" onClick={addEntry} disabled={!(num(qty) > 0)}>Add</button>
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StockSection({ section, rows, openings, onChange }) {
   return (
     <section className="panel inv-section" id={`inv-${section.key}`}>
       <div className="inv-section-head">
         <div className="panel-title" style={{ marginBottom: 0 }}>{section.label}</div>
-        <span className="inv-hint">Remaining = opening + added − used</span>
+        <span className="inv-hint">Tap + to log stock added · Remaining = opening + added − used</span>
       </div>
       <div className="inv-table">
         <div className="inv-tr inv-th">
-          <span>Item</span><span>Opening</span><span>+ Added</span><span>Used</span><span>Remaining</span>
+          <span>Item</span><span>Opening</span><span>Added</span><span>Used</span><span>Remaining</span><span />
         </div>
-        {section.items.map((item) => {
-          const row = rows[item.key];
-          const opening = openings[item.key] ?? 0;
-          const remaining = remainingOf(row, opening);
-          const status = stockStatus(remaining, item);
-          return (
-            <div key={item.key} className={`inv-tr inv-row-${status}`}>
-              <span className="inv-item">
-                <strong>{item.label}</strong>
-                <em>{item.unit}</em>
-                {status === 'low' && <span className="badge badge-amber">Low</span>}
-                {status === 'neg' && <span className="badge badge-red">Check</span>}
-              </span>
-              <span className="inv-cell" data-label="Opening"><span className="inv-static">{opening}</span></span>
-              <span className="inv-cell" data-label="+ Added">
-                <NumInput value={row.added} onChange={(v) => onChange(item.key, { added: v })} />
-              </span>
-              <span className="inv-cell" data-label="Used">
-                <NumInput value={row.used} onChange={(v) => onChange(item.key, { used: v })} />
-              </span>
-              <span className="inv-cell" data-label="Remaining">
-                <NumInput
-                  value={row.manual ? row.remaining : remaining}
-                  className={`form-input inv-num ${row.manual ? 'inv-manual' : 'inv-auto'}`}
-                  title="Auto-calculated. Type to override after a physical count."
-                  onChange={(v) => onChange(item.key, { remaining: v, manual: v !== '' })}
-                />
-              </span>
-            </div>
-          );
-        })}
+        {section.items.map((item) => (
+          <StockRow key={item.key} item={item} row={rows[item.key]} opening={openings[item.key] ?? 0}
+            onChange={(patch) => onChange(item.key, patch)} />
+        ))}
       </div>
     </section>
   );
@@ -263,7 +314,7 @@ export default function InventoryTab() {
       </div>
 
       {error && <div className="form-error" style={{ marginBottom: 12 }}>{error}</div>}
-      {!prevLog && <div className="inv-note">No earlier log found, so opening stock starts at 0. Enter today's stock under <b>+ Added</b>.</div>}
+      {!prevLog && <div className="inv-note">No earlier log found, so opening stock starts at 0. Use the <b>+</b> button on a row to log today's stock.</div>}
 
       {/* summary */}
       <div className="overview-widgets-grid">
@@ -276,9 +327,11 @@ export default function InventoryTab() {
 
       {/* section jump chips */}
       <div className="chip-row scroll inv-chips">
-        {[...STOCK_SECTIONS.map((s) => [s.key, s.label]), ['water', 'Water'], ['cleanliness', 'Cleanliness'], ['vehicles', 'Vehicles'], ['electricity', 'Electricity'], ['history', 'History']]
+        {[['jutebags', 'Jute bags'], ...STOCK_SECTIONS.map((s) => [s.key, s.label]), ['water', 'Water'], ['cleanliness', 'Cleanliness'], ['vehicles', 'Vehicles'], ['electricity', 'Electricity'], ['history', 'History']]
           .map(([k, l]) => <button key={k} className="chip" onClick={() => jump(k)}>{l}</button>)}
       </div>
+
+      <JuteBagsSection />
 
       {STOCK_SECTIONS.slice(0, 2).map((s) => (
         <StockSection key={s.key} section={s} rows={log[s.key]} openings={openings[s.key]}

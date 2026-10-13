@@ -14,6 +14,8 @@ import {
   getDoc,
   setDoc,
   limit,
+  runTransaction,
+  arrayRemove,
 } from 'firebase/firestore';
 import {
   getAuth,
@@ -202,4 +204,93 @@ export async function saveInventoryLog(date, data) {
     updatedAt: serverTimestamp(),
     updatedBy: auth.currentUser?.email || '',
   }, { merge: true });
+}
+
+
+/* ---- jute bags: one doc per physical bag in `jute_bags`, id = bag id ---- */
+
+const BAG_IN_USE = ['assigned', 'at_store', 'out_for_delivery'];
+
+export const bagInUse = (bag) => BAG_IN_USE.includes(String(bag.status || '').toLowerCase().trim());
+
+export function subscribeJuteBags(callback, onError) {
+    return onSnapshot(collection(db, 'jute_bags'), (snap) => {
+        callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    }, onError);
+}
+
+function bagHistory(tx, bagId, event, orderId = null) {
+    tx.set(doc(collection(db, 'bag_assignment_history')), {
+        bag_id: bagId,
+        order_id: orderId,
+        event,
+        stage: 'manager',
+        reason: 'manager_dashboard',
+        actor_id: auth.currentUser?.uid || '',
+        actor_app: 'manager_dashboard',
+        timestamp: serverTimestamp(),
+    });
+}
+
+/** Creates a new, unassigned bag. Fails if the id already exists. */
+export async function addJuteBag(rawId) {
+    const bagId = String(rawId || '').trim().replace(/\//g, '');
+    if (!bagId) throw new Error('Enter a bag ID.');
+    const ref = doc(db, 'jute_bags', bagId);
+    await runTransaction(db, async (tx) => {
+        if ((await tx.get(ref)).exists()) throw new Error(`Bag "${bagId}" already exists.`);
+        tx.set(ref, {
+            bag_id: bagId,
+            status: 'unassigned',
+            current_order_id: null,
+            current_customer_name: null,
+            created_at: serverTimestamp(),
+            updated_at: serverTimestamp(),
+        });
+        bagHistory(tx, bagId, 'created');
+    });
+    return bagId;
+}
+
+/** Frees a bag and removes it from the order it was on (same as a rider release). */
+export async function unassignJuteBag(bagId) {
+    const ref = doc(db, 'jute_bags', bagId);
+    await runTransaction(db, async (tx) => {
+        const snap = await tx.get(ref);
+        if (!snap.exists()) throw new Error(`Bag "${bagId}" no longer exists.`);
+        const orderId = snap.data().current_order_id || null;
+        const orders = [];
+        if (orderId) {
+            for (const c of ['cartdetails', 'hostels_orders']) {
+                const oRef = doc(db, c, orderId);
+                const oSnap = await tx.get(oRef);
+                if (oSnap.exists()) orders.push([oRef, oSnap.data()]);
+            }
+        }
+        for (const [oRef, data] of orders) {
+            const patch = { juteBagIds: arrayRemove(bagId), deliveryJuteBagIds: arrayRemove(bagId) };
+            if (Array.isArray(data.bags)) patch.bags = data.bags.filter((b) => String(b?.bagId ?? '') !== bagId);
+            tx.update(oRef, patch);
+        }
+        tx.update(ref, {
+            status: 'unassigned',
+            current_order_id: null,
+            current_customer_name: null,
+            current_service: null,
+            updated_at: serverTimestamp(),
+        });
+        bagHistory(tx, bagId, 'unassigned', orderId);
+    });
+}
+
+/** Deletes a bag. Only unassigned bags can be deleted. */
+export async function deleteJuteBag(bagId) {
+    const ref = doc(db, 'jute_bags', bagId);
+    await runTransaction(db, async (tx) => {
+        const snap = await tx.get(ref);
+        if (!snap.exists()) return;
+        if (bagInUse(snap.data())) throw new Error(`Bag "${bagId}" is in use. Unassign it first.`);
+        tx.delete(ref);
+        bagHistory(tx, bagId, 'deleted');
+    });
 }

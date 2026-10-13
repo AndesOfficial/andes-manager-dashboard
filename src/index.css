@@ -928,9 +928,33 @@ textarea.form-input { resize: vertical; min-height: 80px; }
 .inv-section-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
 .inv-hint { font-size: 12px; color: var(--ink-soft); }
 .inv-table { display: flex; flex-direction: column; }
-.inv-tr { display: grid; grid-template-columns: 1.6fr 0.8fr 1fr 1fr 1fr; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 10px; }
+.inv-tr { display: grid; grid-template-columns: 1.6fr 0.7fr 0.7fr 1fr 1fr 40px; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 10px; }
 .inv-th { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-soft); }
-.inv-tr:not(.inv-th) { border-bottom: 1px solid var(--border); }
+.inv-rowwrap { border-bottom: 1px solid var(--border); border-radius: 10px; }
+.inv-plus { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--blue); background: #fff; color: var(--blue); cursor: pointer; transition: transform .15s; }
+.inv-plus:hover { background: #eff6ff; }
+.inv-plus.open { background: var(--blue); color: #fff; transform: rotate(45deg); }
+.inv-adds { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 10px 10px; }
+.inv-add-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; background: var(--green-bg); color: #047857; border-radius: 999px; padding: 3px 4px 3px 10px; }
+.inv-add-chip button { display: inline-flex; border: none; background: none; color: inherit; cursor: pointer; padding: 2px; opacity: .7; }
+.inv-add-form { display: flex; gap: 6px; flex: 1; min-width: 260px; }
+.inv-add-form .form-input { margin: 0; padding: 8px 10px; }
+.inv-add-form .inv-num { max-width: 120px; text-align: left; }
+.jb-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 12px; }
+.jb-stat { border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px; text-align: left; background: #fff; font: inherit; cursor: pointer; }
+.jb-stat strong { display: block; font-size: 22px; }
+.jb-stat span { font-size: 12px; color: var(--ink-soft); }
+.jb-stat.active { border-color: var(--blue); background: #eff6ff; }
+.jb-toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.jb-toolbar .form-input { margin: 0; flex: 1; min-width: 160px; }
+.jb-list { display: flex; flex-direction: column; max-height: 420px; overflow-y: auto; }
+.jb-row { display: grid; grid-template-columns: 1fr 1.6fr auto; gap: 10px; align-items: center; padding: 9px 10px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.jb-row em { font-style: normal; color: var(--ink-soft); font-size: 12px; }
+.jb-actions { display: flex; gap: 6px; }
+.jb-btn { border: 1px solid var(--border); background: #fff; border-radius: 8px; padding: 6px 10px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+.jb-btn:disabled { opacity: .5; cursor: default; }
+.jb-btn.danger { color: var(--red); }
+.jb-btn.danger:hover:not(:disabled) { background: var(--red-bg); }
 .inv-row-low { background: var(--amber-bg); }
 .inv-row-neg { background: var(--red-bg); }
 .inv-item { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 14px; }
@@ -956,7 +980,13 @@ textarea.form-input { resize: vertical; min-height: 80px; }
 
 @media (max-width: 768px) {
   .inv-th { display: none; }
-  .inv-tr { grid-template-columns: repeat(2, 1fr); padding: 12px; border: 1px solid var(--border); margin-bottom: 8px; }
+  .inv-tr { grid-template-columns: repeat(2, 1fr); padding: 12px; }
+  .inv-rowwrap { border: 1px solid var(--border); margin-bottom: 8px; }
+  .inv-plus-cell { grid-column: 1 / -1; }
+  .inv-plus { width: 100%; border-radius: 10px; }
+  .inv-plus.open { transform: none; }
+  .jb-row { grid-template-columns: 1fr auto; }
+  .jb-row > em { grid-column: 1 / -1; grid-row: 2; }
   .inv-item { grid-column: 1 / -1; }
   .inv-cell::before { content: attr(data-label); display: block; font-size: 10.5px; font-weight: 700; text-transform: uppercase; color: var(--ink-soft); margin-bottom: 4px; }
   .inv-static { text-align: left; padding-left: 0; }
