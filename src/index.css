@@ -928,8 +928,21 @@ textarea.form-input { resize: vertical; min-height: 80px; }
 .inv-section-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
 .inv-hint { font-size: 12px; color: var(--ink-soft); }
 .inv-table { display: flex; flex-direction: column; }
-.inv-tr { display: grid; grid-template-columns: 1.6fr 0.7fr 0.7fr 1fr 1fr 40px; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 10px; }
+.inv-tr { display: grid; grid-template-columns: minmax(180px, 1.8fr) 1fr 1fr 1fr 1fr 44px; gap: 12px; align-items: center; padding: 8px 12px; border-radius: 10px; }
 .inv-th { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-soft); }
+.col-item { text-align: left; }
+.col-date { text-align: center; display: flex; justify-content: center; align-items: center; }
+.col-inv { text-align: center; display: flex; justify-content: center; align-items: center; }
+.col-used { text-align: center; display: flex; justify-content: center; align-items: center; }
+.col-rem { text-align: center; display: flex; justify-content: center; align-items: center; }
+.col-act { display: flex; justify-content: center; align-items: center; }
+
+.inv-th .col-item { text-align: left; }
+.inv-th .col-date,
+.inv-th .col-inv,
+.inv-th .col-used,
+.inv-th .col-rem { text-align: center; }
+
 .inv-rowwrap { border-bottom: 1px solid var(--border); border-radius: 10px; }
 .inv-plus { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--blue); background: #fff; color: var(--blue); cursor: pointer; transition: transform .15s; }
 .inv-plus:hover { background: #eff6ff; }
@@ -959,7 +972,9 @@ textarea.form-input { resize: vertical; min-height: 80px; }
 .inv-row-neg { background: var(--red-bg); }
 .inv-item { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 14px; }
 .inv-item em, .inv-sub { font-style: normal; font-size: 11px; color: var(--ink-soft); }
-.inv-num { margin: 0; padding: 9px 10px; text-align: right; }
+.inv-date-cell { font-size: 13px; font-weight: 600; color: var(--ink-soft); }
+.inv-badge-cell { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; padding: 5px 12px; border-radius: 8px; background: var(--gray-bg); font-weight: 700; font-size: 14px; color: var(--ink); }
+.inv-num { margin: 0; padding: 9px 10px; text-align: center; width: 100%; max-width: 110px; }
 .inv-auto { background: var(--gray-bg); font-weight: 700; }
 .inv-manual { border-color: var(--blue); font-weight: 700; }
 .inv-static { display: block; text-align: right; font-weight: 600; color: var(--ink-soft); padding: 9px 10px; }
@@ -989,6 +1004,10 @@ textarea.form-input { resize: vertical; min-height: 80px; }
   .jb-row > em { grid-column: 1 / -1; grid-row: 2; }
   .inv-item { grid-column: 1 / -1; }
   .inv-cell::before { content: attr(data-label); display: block; font-size: 10.5px; font-weight: 700; text-transform: uppercase; color: var(--ink-soft); margin-bottom: 4px; }
+  .col-date, .col-inv, .col-used, .col-rem { display: block; text-align: left; }
+  .inv-date-cell { padding: 4px 0; display: block; font-size: 14px; }
+  .inv-badge-cell { display: inline-flex; }
+  .inv-num { text-align: left; max-width: 100%; }
   .inv-static { text-align: left; padding-left: 0; }
   .inv-history-row { grid-template-columns: 1fr 1fr; }
   .inv-save-wrap .btn-action-primary { display: none; }

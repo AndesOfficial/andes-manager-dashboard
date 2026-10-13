@@ -21,6 +21,7 @@ const isBlank = (v) => v === '' || v === null || v === undefined;
 const num = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
 const round = (n) => Math.round(n * 100) / 100;
 const fmtDay = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
+const fmtRowDate = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 
 const emptyLog = () => {
   const log = {
@@ -90,10 +91,11 @@ function NumInput({ value, onChange, placeholder = '0', ...rest }) {
 // `added` is their total.
 const addsOf = (row) => (Array.isArray(row.adds) ? row.adds : []);
 
-function StockRow({ item, row, opening, onChange }) {
+function StockRow({ item, row, opening, date, onChange }) {
   const [open, setOpen] = useState(false);
   const [qty, setQty] = useState('');
   const [note, setNote] = useState('');
+  const inventory = round(opening + num(row.added));
   const remaining = remainingOf(row, opening);
   const status = stockStatus(remaining, item);
   const adds = addsOf(row);
@@ -114,18 +116,22 @@ function StockRow({ item, row, opening, onChange }) {
   return (
     <div className={`inv-rowwrap inv-row-${status}`}>
       <div className="inv-tr">
-        <span className="inv-item">
+        <span className="inv-item col-item">
           <strong>{item.label}</strong>
           <em>{item.unit}</em>
           {status === 'low' && <span className="badge badge-amber">Low</span>}
           {status === 'neg' && <span className="badge badge-red">Check</span>}
         </span>
-        <span className="inv-cell" data-label="Opening"><span className="inv-static">{opening}</span></span>
-        <span className="inv-cell" data-label="Added"><span className="inv-static">{num(row.added) > 0 ? `+${num(row.added)}` : '—'}</span></span>
-        <span className="inv-cell" data-label="Used">
+        <span className="inv-cell col-date" data-label="Date">
+          <span className="inv-date-cell">{fmtRowDate(date)}</span>
+        </span>
+        <span className="inv-cell col-inv" data-label="Inventory">
+          <span className="inv-badge-cell">{inventory}</span>
+        </span>
+        <span className="inv-cell col-used" data-label="Used">
           <NumInput value={row.used} onChange={(v) => onChange({ used: v })} />
         </span>
-        <span className="inv-cell" data-label="Remaining">
+        <span className="inv-cell col-rem" data-label="Remaining">
           <NumInput
             value={row.manual ? row.remaining : remaining}
             className={`form-input inv-num ${row.manual ? 'inv-manual' : 'inv-auto'}`}
@@ -133,7 +139,7 @@ function StockRow({ item, row, opening, onChange }) {
             onChange={(v) => onChange({ remaining: v, manual: v !== '' })}
           />
         </span>
-        <span className="inv-cell inv-plus-cell">
+        <span className="inv-cell inv-plus-cell col-act">
           <button type="button" className={`inv-plus ${open ? 'open' : ''}`} onClick={() => setOpen((o) => !o)}
             title={`Add ${item.label} stock`} aria-label={`Add ${item.label} stock`}>
             <Plus size={16} />
@@ -163,20 +169,25 @@ function StockRow({ item, row, opening, onChange }) {
   );
 }
 
-function StockSection({ section, rows, openings, onChange }) {
+function StockSection({ section, rows, openings, date, onChange }) {
   return (
     <section className="panel inv-section" id={`inv-${section.key}`}>
       <div className="inv-section-head">
         <div className="panel-title" style={{ marginBottom: 0 }}>{section.label}</div>
-        <span className="inv-hint">Tap + to log stock added · Remaining = opening + added − used</span>
+        <span className="inv-hint">Tap + to log stock added · Remaining = inventory − used</span>
       </div>
       <div className="inv-table">
         <div className="inv-tr inv-th">
-          <span>Item</span><span>Opening</span><span>Added</span><span>Used</span><span>Remaining</span><span />
+          <span className="col-item">Item</span>
+          <span className="col-date">Date</span>
+          <span className="col-inv">Inventory</span>
+          <span className="col-used">Used</span>
+          <span className="col-rem">Remaining</span>
+          <span className="col-act" />
         </div>
         {section.items.map((item) => (
           <StockRow key={item.key} item={item} row={rows[item.key]} opening={openings[item.key] ?? 0}
-            onChange={(patch) => onChange(item.key, patch)} />
+            date={date} onChange={(patch) => onChange(item.key, patch)} />
         ))}
       </div>
     </section>
@@ -265,7 +276,9 @@ export default function InventoryTab() {
       const data = structuredClone(log);
       STOCK_SECTIONS.forEach((s) => s.items.forEach((it) => {
         const row = data[s.key][it.key];
+        row.date = date;
         row.opening = openings[s.key][it.key];
+        row.inventory = round(row.opening + num(row.added));
         row.remaining = remainingOf(row, row.opening);
       }));
       data.water.remaining = waterRemaining;
@@ -314,7 +327,7 @@ export default function InventoryTab() {
       </div>
 
       {error && <div className="form-error" style={{ marginBottom: 12 }}>{error}</div>}
-      {!prevLog && <div className="inv-note">No earlier log found, so opening stock starts at 0. Use the <b>+</b> button on a row to log today's stock.</div>}
+      {!prevLog && <div className="inv-note">No earlier log found, so inventory starts at 0. Use the <b>+</b> button on a row to log today's stock.</div>}
 
       {/* summary */}
       <div className="overview-widgets-grid">
@@ -334,7 +347,7 @@ export default function InventoryTab() {
       <JuteBagsSection />
 
       {STOCK_SECTIONS.slice(0, 2).map((s) => (
-        <StockSection key={s.key} section={s} rows={log[s.key]} openings={openings[s.key]}
+        <StockSection key={s.key} section={s} rows={log[s.key]} openings={openings[s.key]} date={date}
           onChange={(item, patch) => edit((l) => { Object.assign(l[s.key][item], patch); return l; })} />
       ))}
 
@@ -360,7 +373,7 @@ export default function InventoryTab() {
       </section>
 
       {STOCK_SECTIONS.slice(2).map((s) => (
-        <StockSection key={s.key} section={s} rows={log[s.key]} openings={openings[s.key]}
+        <StockSection key={s.key} section={s} rows={log[s.key]} openings={openings[s.key]} date={date}
           onChange={(item, patch) => edit((l) => { Object.assign(l[s.key][item], patch); return l; })} />
       ))}
 
