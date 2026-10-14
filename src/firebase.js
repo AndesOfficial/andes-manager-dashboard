@@ -3,9 +3,6 @@ import {
   getFirestore,
   collection,
   doc,
-  addDoc,
-  updateDoc,
-  deleteDoc,
   onSnapshot,
   query,
   orderBy,
@@ -14,6 +11,8 @@ import {
   getDoc,
   setDoc,
   limit,
+  where,
+  Timestamp,
   runTransaction,
   arrayRemove,
 } from 'firebase/firestore';
@@ -63,7 +62,7 @@ export function subscribeAuth(callback) {
 }
 
 // Shared manager login (temporary until each manager has their own account).
-// Must match the b2bBatches / b2cOrders rules in Firestore.
+// Must match the managerB2bEntries / managerVerifications rules in Firestore.
 const MANAGER_EMAILS = [
   'manager@andes.co.in',
 ];
@@ -76,88 +75,170 @@ export function isManagerUser(user) {
   return user && MANAGER_EMAILS.includes(user.email);
 }
 
-/* ---- collection refs ---- */
-const b2bCol = collection(db, 'b2bBatches');
-const b2cCol = collection(db, 'b2cOrders');
+/* ---- archived hand-typed records (read-only, kept for history) ---- */
 
-/* ---- queries (newest first) ---- */
-const b2bQuery = query(b2bCol, orderBy('createdAt', 'desc'));
-const b2cQuery = query(b2cCol, orderBy('createdAt', 'desc'));
-
-/* ---- CRUD helpers ---- */
-
-export async function addB2b(data) {
-  const { id, ...rest } = data; // strip client-side id
-  return addDoc(b2bCol, { ...rest, createdAt: serverTimestamp() });
-}
-
-export async function updateB2b(docId, data) {
-  const { id, ...rest } = data;
-  return updateDoc(doc(db, 'b2bBatches', docId), { ...rest, updatedAt: serverTimestamp() });
-}
-
-export async function removeB2b(docId) {
-  return deleteDoc(doc(db, 'b2bBatches', docId));
-}
-
-export async function addB2c(data) {
-  const { id, ...rest } = data;
-  return addDoc(b2cCol, { ...rest, createdAt: serverTimestamp() });
-}
-
-export async function updateB2c(docId, data) {
-  const { id, ...rest } = data;
-  return updateDoc(doc(db, 'b2cOrders', docId), { ...rest, updatedAt: serverTimestamp() });
-}
-
-export async function removeB2c(docId) {
-  return deleteDoc(doc(db, 'b2cOrders', docId));
-}
-
-/* ---- real-time listeners ---- */
-
-export function subscribeB2b(callback, onError) {
-  return onSnapshot(b2bQuery, (snap) => {
-    const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    callback(list);
+function subscribeArchive(name, callback, onError) {
+  return onSnapshot(query(collection(db, name), orderBy('createdAt', 'desc')), (snap) => {
+    callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
   }, onError);
 }
+export const subscribeB2bArchive = (cb, onError) => subscribeArchive('b2bBatches', cb, onError);
+export const subscribeB2cArchive = (cb, onError) => subscribeArchive('b2cOrders', cb, onError);
 
-export function subscribeB2c(callback, onError) {
-  return onSnapshot(b2cQuery, (snap) => {
-    const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    callback(list);
-  }, onError);
-}
+/* ---- service categories (names only — no prices reach the manager site) ---- */
 
-/* ---- live price list (same `prices` collection the customer app uses) ---- */
-
-// Returns [{ id, name, category, unit: 'kg' | 'piece' | 'pair', rate }] for every
-// priced item, sorted by category then name.
-export async function fetchPriceItems() {
+// { 'kurta/kurti': 'Dry Cleaning', ... } keyed by lower-case service name.
+export async function fetchServiceCategories() {
   const snap = await getDocs(collection(db, 'prices'));
-  const items = [];
+  const map = {};
   snap.docs.forEach((d) => {
     const data = d.data();
-    const name = (data.serviceName || '').trim();
-    if (!name || data.status === 'archived') return;
-    const category = data.category || '';
-    const kg = Number(data.rateByKg);
-    const piece = Number(data.rateByPiece) || Number(data.rateByPair);
-    // The admin-set unit decides; rate fields only for docs without one.
-    const unit = ['kg', 'piece', 'pair'].includes(data.unit) ? data.unit : (kg > 0 ? 'kg' : 'piece');
-    const rate = unit === 'kg' ? kg : unit === 'pair' ? (Number(data.rateByPair) || piece) : piece;
-    if (rate > 0) items.push({ id: d.id, name, category, unit, rate });
-    // Household sub-services ("Bed Sheet Single (Wash)") are per piece.
-    (Array.isArray(data.subServices) ? data.subServices : []).forEach((sub, i) => {
-      const subName = String(sub?.name || sub?.serviceName || '').trim();
-      const subRate = Number(sub?.rateByPiece);
-      if (!subName || sub?.status === 'archived' || !(subRate > 0)) return;
-      items.push({ id: `${d.id}_${i}`, name: `${name} (${subName})`, category, unit: 'piece', rate: subRate });
+    const name = String(data.serviceName || '').trim().toLowerCase();
+    if (name) map[name] = data.category || '';
+  });
+  return map;
+}
+
+/* ---- date helpers: day = 'YYYY-MM-DD' in local time ---- */
+
+const dayStart = (day) => new Date(`${day}T00:00:00`);
+const nextDay = (day) => { const d = dayStart(day); d.setDate(d.getDate() + 1); return d; };
+
+const actor = () => auth.currentUser?.email || '';
+const historyEntry = (action, reason = '', changes = []) => ({
+  at: new Date().toISOString(), by: actor(), action, reason, changes,
+});
+
+/* ---- B2C: rider orders (`cartdetails`) for one pickup day ---- */
+
+// Rider app writes scheduledPickupDate (Timestamp) and/or pickupDate ('YYYY-MM-DD').
+// Two single-field queries, merged by id — no composite index needed.
+export function subscribeB2cOrders(day, callback, onError) {
+  const col = collection(db, 'cartdetails');
+  const parts = [new Map(), new Map()];
+  const ready = [false, false];
+  const emit = () => {
+    if (!ready[0] || !ready[1]) return;
+    callback([...new Map([...parts[0], ...parts[1]]).values()]);
+  };
+  const listen = (q, i) => onSnapshot(q, (snap) => {
+    parts[i] = new Map(snap.docs.map((d) => [d.id, { id: d.id, ...d.data() }]));
+    ready[i] = true;
+    emit();
+  }, onError);
+  const unsubs = [
+    listen(query(col, where('scheduledPickupDate', '>=', Timestamp.fromDate(dayStart(day))),
+      where('scheduledPickupDate', '<', Timestamp.fromDate(nextDay(day)))), 0),
+    listen(query(col, where('pickupDate', '==', day)), 1),
+  ];
+  return () => unsubs.forEach((u) => u());
+}
+
+const verCol = collection(db, 'managerVerifications');
+
+export function subscribeVerifications(day, callback, onError) {
+  return onSnapshot(query(verCol, where('pickupDate', '==', day)), (snap) => {
+    callback(Object.fromEntries(snap.docs.map((d) => [d.id, d.data()])));
+  }, onError);
+}
+
+/**
+ * Verify / correct / cancel / restore a B2C order. Never touches `cartdetails`,
+ * so the customer's bill is unaffected. Refuses once Admin has counted it.
+ */
+export async function saveB2cVerification(row, day, action, { lines, reason = '', changes = [] } = {}) {
+  const ref = doc(verCol, row.id);
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    const cur = snap.exists() ? snap.data() : {};
+    if (cur.adminLockedAt) throw new Error('Admin has already counted this order. Ask Admin for an adjustment.');
+    const status = action === 'cancel' ? 'cancelled' : action === 'restore' ? 'pending' : 'verified';
+    tx.set(ref, {
+      source: 'b2c',
+      orderId: row.id,
+      pickupDate: day,
+      customer: row.customer,
+      status,
+      riderSig: row.riderSig,
+      riderLines: row.rider,
+      lines: lines || cur.lines || row.rider,
+      kg: (lines || cur.lines || row.rider).reduce((s, l) => s + (Number(l.kg) || 0), 0),
+      clothes: (lines || cur.lines || row.rider).reduce((s, l) => s + (Number(l.qty) || 0), 0),
+      history: [...(cur.history || []), historyEntry(action, reason, changes)],
+      updatedAt: serverTimestamp(),
+      updatedBy: actor(),
+      ...(status === 'verified' ? { verifiedAt: serverTimestamp(), verifiedBy: actor() } : {}),
+    }, { merge: true });
+  });
+}
+
+/* ---- B2B: manager-entered batches (`managerB2bEntries`) ---- */
+
+const b2bEntryCol = collection(db, 'managerB2bEntries');
+const slug = (s) => String(s || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'x';
+
+export function subscribeB2bEntries(day, callback, onError) {
+  return onSnapshot(query(b2bEntryCol, where('date', '==', day)), (snap) => {
+    callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => a.client.localeCompare(b.client) || String(a.batchNo).localeCompare(String(b.batchNo))));
+  }, onError);
+}
+
+/** Creates an entry. Id = date + client + batch, so the same batch can't be entered twice. */
+export async function addB2bEntry(entry) {
+  const id = `${entry.date}__${slug(entry.client)}__${slug(entry.batchNo || '1')}`;
+  const ref = doc(b2bEntryCol, id);
+  await runTransaction(db, async (tx) => {
+    if ((await tx.get(ref)).exists()) {
+      throw new Error(`${entry.client} batch ${entry.batchNo || '1'} is already entered for this date.`);
+    }
+    tx.set(ref, {
+      ...entry,
+      source: 'b2b',
+      status: 'pending',
+      history: [historyEntry('create')],
+      createdAt: serverTimestamp(),
+      createdBy: actor(),
+      updatedAt: serverTimestamp(),
     });
   });
-  items.sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
-  return items;
+}
+
+/** action: 'verify' | 'edit' | 'cancel' | 'restore'. `patch` only for edits. */
+export async function updateB2bEntry(id, action, { patch = {}, reason = '', changes = [] } = {}) {
+  const ref = doc(b2bEntryCol, id);
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists()) throw new Error('This entry no longer exists.');
+    const cur = snap.data();
+    if (cur.adminLockedAt) throw new Error('Admin has already counted this entry. Ask Admin for an adjustment.');
+    const status = action === 'cancel' ? 'cancelled' : action === 'verify' ? 'verified' : 'pending';
+    tx.update(ref, {
+      ...patch,
+      status,
+      history: [...(cur.history || []), historyEntry(action, reason, changes)],
+      updatedAt: serverTimestamp(),
+      updatedBy: actor(),
+      ...(status === 'verified' ? { verifiedAt: serverTimestamp(), verifiedBy: actor() } : {}),
+    });
+  });
+}
+
+/* ---- store-app B2B orders for the same day (reference only, never totalled) ---- */
+
+export async function fetchStoreB2bReference(day) {
+  const range = [where('createdAt', '>=', Timestamp.fromDate(dayStart(day))), where('createdAt', '<', Timestamp.fromDate(nextDay(day)))];
+  const snap = await getDocs(query(collection(db, 'hostels_orders'), ...range));
+  const byClient = {};
+  snap.docs.forEach((d) => {
+    const o = d.data();
+    const name = String(o.hostelName || o.hostel || o.location?.hostel || 'Unknown').trim();
+    const r = byClient[name] || (byClient[name] = { client: name, orders: 0, clothes: 0, kg: 0 });
+    r.orders += 1;
+    r.clothes += Number(o.clothesCount) || 0;
+    r.kg += Number(o.clothesWeightKg ?? o.weight) || 0;
+  });
+  return Object.values(byClient).sort((a, b) => a.client.localeCompare(b.client));
 }
 
 /* ---- hostel names from b2b_partner ---- */
