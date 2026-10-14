@@ -1,35 +1,37 @@
 import React, { useState } from 'react';
-import { Building2, Users, ChevronDown, ChevronUp } from 'lucide-react';
+import { Building2, Users, Package, Shirt, BadgeCheck, ChevronDown, ChevronUp, ArrowRight } from 'lucide-react';
 import { SERVICE_GROUPS } from '../../lib/orders';
-import { fmtKg, StatusBadge } from './shared';
+import { fmtKg, fmtDay, Tile, StatusBadge } from './shared';
 
-function Totals({ kg, clothes, verified, total, unit }) {
+const SERVICE_TONE = { wash_iron: 'blue', wash_fold: 'green', dry_clean: 'purple', iron: 'amber', other: 'gray' };
+
+function SectionTotals({ kg, clothes, verified, total, unit }) {
+  const left = total - verified;
   return (
-    <div className="ops-totals">
-      <div><div className="ops-big">{fmtKg(kg)}</div><div className="ops-label">KG processed</div></div>
-      <div><div className="ops-big">{clothes}</div><div className="ops-label">Clothes processed</div></div>
-      <div>
-        <div className="ops-big">{verified}<span className="ops-of">/{total}</span></div>
-        <div className="ops-label">{unit} verified</div>
-      </div>
+    <div className="overview-widgets-grid ops-grid-3">
+      <Tile tone="blue" icon={<Package size={16} />} label="KG processed" value={fmtKg(kg)} />
+      <Tile tone="purple" icon={<Shirt size={16} />} label="Clothes processed" value={clothes} />
+      <Tile tone={left ? 'amber' : 'green'} icon={<BadgeCheck size={16} />} label={`${unit} verified`}
+        value={<>{verified}<span className="ops-of"> / {total}</span></>}
+        sub={total === 0 ? 'Nothing for these dates' : left ? `${left} still to verify` : 'All verified ✓'} />
     </div>
   );
 }
 
 function ServiceCard({ group, data, onOpen }) {
   const [open, setOpen] = useState(false);
-  const showList = !group.byKg && data.rows.length > 0;
+  const tone = SERVICE_TONE[group.id];
   return (
-    <div className="svc-card">
-      <div className="svc-head">
-        <span className="svc-name">{group.label}</span>
-        <span className="svc-orders">{data.orders} order{data.orders === 1 ? '' : 's'}</span>
+    <div className={`widget-card widget-${tone} ops-tile`}>
+      <div className="widget-header">
+        <span className="widget-label">{group.label}</span>
+        <span className={`badge badge-${tone === 'purple' ? 'blue' : tone}`}>{data.orders} order{data.orders === 1 ? '' : 's'}</span>
       </div>
-      <div className="svc-value">{group.byKg ? fmtKg(data.kg) : `${data.clothes} clothes`}</div>
-      {group.byKg && data.clothes > 0 && <div className="svc-sub">{data.clothes} clothes</div>}
-      {showList && (
+      <div className="widget-value">{group.byKg ? fmtKg(data.kg) : data.clothes}</div>
+      <div className="ops-tile-sub">{group.byKg ? `${data.clothes} clothes` : 'clothes'}</div>
+      {data.rows.length > 0 && (
         <button className="history-toggle" onClick={() => setOpen(!open)}>
-          {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />} {open ? 'Hide' : 'Show'} orders
+          {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />} {open ? 'Hide' : 'View'} orders
         </button>
       )}
       {open && (
@@ -38,9 +40,10 @@ function ServiceCard({ group, data, onOpen }) {
             <li key={r.id} onClick={() => onOpen(r.id)}>
               <div className="svc-list-top"><strong>{r.customer}</strong><StatusBadge status={r.status} locked={r.locked} /></div>
               <div className="svc-items">
-                {r.lines.filter((l) => l.group === group.id).map((l) => `${l.name} × ${l.qty}`).join(', ')}
+                {r.lines.filter((l) => l.group === group.id)
+                  .map((l) => (group.byKg ? `${fmtKg(l.kg)} · ${l.qty} pcs` : `${l.name} × ${l.qty}`)).join(', ')}
               </div>
-              <div className="svc-sub">Order status: {r.orderStatus || '—'}</div>
+              <div className="ops-muted">{fmtDay(r.pickupDay)} · {r.orderStatus || '—'}</div>
             </li>
           ))}
         </ul>
@@ -49,24 +52,28 @@ function ServiceCard({ group, data, onOpen }) {
   );
 }
 
+function SectionHead({ icon, title, onOpen, label }) {
+  return (
+    <div className="ops-section-head">
+      <h2 className="ops-h2">{icon} {title}</h2>
+      <button className="btn-ghost" onClick={onOpen}>{label} <ArrowRight size={14} /></button>
+    </div>
+  );
+}
+
 export default function OverviewTab({ b2c, b2bSum, onGo }) {
   return (
     <div className="ops-overview">
-      <section className="panel">
-        <div className="ops-section-head">
-          <div className="panel-title"><Building2 size={16} /> B2B Overview</div>
-          <button className="chip" onClick={() => onGo('b2b')}>Open B2B →</button>
-        </div>
-        <Totals kg={b2bSum.kg} clothes={b2bSum.clothes} verified={b2bSum.verified} total={b2bSum.entries} unit="Entries" />
+      <section>
+        <SectionHead icon={<Building2 size={18} />} title="B2B Overview" label="Verify B2B" onOpen={() => onGo('b2b')} />
+        <SectionTotals kg={b2bSum.kg} clothes={b2bSum.clothes} verified={b2bSum.verified} total={b2bSum.entries} unit="Entries" />
       </section>
 
-      <section className="panel">
-        <div className="ops-section-head">
-          <div className="panel-title"><Users size={16} /> B2C Overview</div>
-          <button className="chip" onClick={() => onGo('b2c')}>Open B2C →</button>
-        </div>
-        <Totals kg={b2c.kg} clothes={b2c.clothes} verified={b2c.verified} total={b2c.orders} unit="Orders" />
-        <div className="svc-grid">
+      <section>
+        <SectionHead icon={<Users size={18} />} title="B2C Overview" label="Verify B2C" onOpen={() => onGo('b2c')} />
+        <SectionTotals kg={b2c.kg} clothes={b2c.clothes} verified={b2c.verified} total={b2c.orders} unit="Orders" />
+        <div className="ops-subhead">By service</div>
+        <div className="overview-widgets-grid ops-grid-4">
           {SERVICE_GROUPS.filter((g) => g.id !== 'other' || b2c.groups.other.orders > 0).map((g) => (
             <ServiceCard key={g.id} group={g} data={b2c.groups[g.id]} onOpen={(id) => onGo('b2c', id)} />
           ))}

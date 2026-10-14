@@ -3,14 +3,14 @@ import { Search, Loader2 } from 'lucide-react';
 import { saveB2cVerification } from '../../firebase';
 import { SERVICE_GROUPS, diffLines, num, round1 } from '../../lib/orders';
 import {
-  fmtKg, EmptyState, Sheet, StatusBadge, RowActions, ReasonSheet, HistoryList,
+  fmtKg, fmtDay, EmptyState, Sheet, StatusBadge, RowActions, ReasonSheet, HistoryList,
   STATUS_FILTERS, matchesFilter,
 } from './shared';
 
 const groupLabel = Object.fromEntries(SERVICE_GROUPS.map((g) => [g.id, g.label]));
 const isKgLine = (l) => l.group === 'wash_fold' || l.group === 'wash_iron';
 
-function EditSheet({ row, day, onClose }) {
+function EditSheet({ row, onClose }) {
   const [lines, setLines] = useState(() => row.lines.map((l) => ({ ...l })));
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
@@ -25,7 +25,7 @@ function EditSheet({ row, day, onClose }) {
     if (!reason.trim()) { setError('Write why you are correcting this.'); return; }
     setSaving(true);
     try {
-      await saveB2cVerification(row, day, 'edit', { lines: clean, reason: reason.trim(), changes });
+      await saveB2cVerification(row, 'edit', { lines: clean, reason: reason.trim(), changes });
       onClose();
     } catch (err) { setError(err.message); setSaving(false); }
   };
@@ -63,19 +63,19 @@ function EditSheet({ row, day, onClose }) {
   );
 }
 
-function OrderRow({ row, day, highlight, onEdit, onCancel }) {
+function OrderRow({ row, highlight, onEdit, onCancel }) {
   const [busy, setBusy] = useState(false);
   const run = async (action) => {
     setBusy(true);
-    try { await saveB2cVerification(row, day, action, { lines: row.lines }); } catch (err) { alert(err.message); }
+    try { await saveB2cVerification(row, action, { lines: row.lines }); } catch (err) { alert(err.message); }
     setBusy(false);
   };
   return (
-    <div className={`card ops-row ${highlight ? 'ops-row-hl' : ''}`} id={`b2c-${row.id}`}>
+    <div className={`card ops-row ops-st-${row.status} ${highlight ? 'ops-row-hl' : ''}`} id={`b2c-${row.id}`}>
       <div className="card-top">
         <div>
           <div className="card-name">{row.customer}</div>
-          <div className="ops-muted">#{row.id.slice(-6).toUpperCase()} · {row.orderStatus || '—'}</div>
+          <div className="ops-muted">#{row.id.slice(-6).toUpperCase()} · Pickup {fmtDay(row.pickupDay)} · {row.orderStatus || '—'}</div>
         </div>
         <div className="ops-row-kg">{row.kg > 0 && fmtKg(row.kg)}<div className="ops-muted">{row.clothes} clothes</div></div>
       </div>
@@ -108,7 +108,7 @@ function OrderRow({ row, day, highlight, onEdit, onCancel }) {
   );
 }
 
-export default function B2CTab({ day, rows, focusId }) {
+export default function B2CTab({ rows, focusId }) {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('todo');
   const [editing, setEditing] = useState(null);
@@ -145,20 +145,20 @@ export default function B2CTab({ day, rows, focusId }) {
       </div>
 
       {rows.length === 0 ? (
-        <EmptyState title="No rider orders for this day" sub="Orders show here once their pickup is scheduled for this date." />
+        <EmptyState title="No rider orders for these dates" sub="Orders show here by their pickup date." />
       ) : list.length === 0 ? (
         <EmptyState title={filter === 'todo' ? 'All orders verified 🎉' : 'No matches'} sub="Try another filter or search." />
       ) : (
-        <div className="list">
-          {list.map((r) => <OrderRow key={r.id} row={r} day={day} highlight={r.id === focusId} onEdit={setEditing} onCancel={setCancelling} />)}
+        <div className="ops-cards">
+          {list.map((r) => <OrderRow key={r.id} row={r} highlight={r.id === focusId} onEdit={setEditing} onCancel={setCancelling} />)}
         </div>
       )}
 
-      {liveEditing && <EditSheet row={liveEditing} day={day} onClose={() => setEditing(null)} />}
+      {liveEditing && <EditSheet row={liveEditing} onClose={() => setEditing(null)} />}
       {cancelling && (
         <ReasonSheet title={`Cancel ${cancelling.customer}'s order record`} confirmLabel="Cancel record"
           onClose={() => setCancelling(null)}
-          onConfirm={(reason) => saveB2cVerification(cancelling, day, 'cancel', { lines: cancelling.lines, reason })} />
+          onConfirm={(reason) => saveB2cVerification(cancelling, 'cancel', { lines: cancelling.lines, reason })} />
       )}
     </div>
   );

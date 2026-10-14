@@ -69,6 +69,43 @@ export function groupOf(rawKey, categories = {}) {
   return 'other';
 }
 
+const MONTHS = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+
+/** 'YYYY-MM-DD' of a Date in India time. */
+export const istDay = (d) => new Date(d.getTime() + 330 * 60000).toISOString().slice(0, 10);
+
+const toDate = (v) => (v && typeof v.toDate === 'function' ? v.toDate()
+  : v instanceof Date ? v
+    : typeof v === 'number' || /^\d{12,}$/.test(String(v ?? '')) ? new Date(Number(v))
+      : null);
+
+/**
+ * Pickup day of a rider order. The apps store it in several shapes:
+ * scheduledPickupDate (Timestamp), pickupDate ('YYYY-MM-DD'), pickupTime
+ * (Timestamp, ISO string, or text like "Tue, 14 Oct · 6:00 PM - 10:00 PM"),
+ * and older orders only a slot ("6:00 PM - 10:00 PM") — those use the order date.
+ */
+export function pickupDay(o) {
+  const created = toDate(o.createdAt) || toDate(o.orderTimestamp);
+  const sched = toDate(o.scheduledPickupDate);
+  if (sched) return istDay(sched);
+  if (/^\d{4}-\d{2}-\d{2}/.test(String(o.pickupDate || ''))) return String(o.pickupDate).slice(0, 10);
+  const pt = o.pickupTime;
+  const ptDate = toDate(pt);
+  if (ptDate) return istDay(ptDate);
+  if (typeof pt === 'string') {
+    if (/^\d{4}-\d{2}-\d{2}/.test(pt)) return pt.slice(0, 10);
+    const m = pt.match(/\b(\d{1,2})\s+([A-Za-z]{3})/);
+    if (m && MONTHS[m[2].toLowerCase()] !== undefined && created) {
+      let year = created.getFullYear();
+      const month = MONTHS[m[2].toLowerCase()];
+      if (month < created.getMonth() - 6) year += 1; // Dec order, Jan pickup
+      return `${year}-${String(month + 1).padStart(2, '0')}-${String(m[1]).padStart(2, '0')}`;
+    }
+  }
+  return created ? istDay(created) : '';
+}
+
 /** Rider-recorded order weight, newest field first. */
 const orderWeight = (o) => num(o.riderRecordedWeightKg ?? o.clothesWeightKg ?? o.internalWeightKg ?? o.weightKg ?? o.weight);
 
@@ -114,6 +151,7 @@ export function buildB2cRow(order, verification, categories) {
   return {
     id: order.id,
     order,
+    pickupDay: pickupDay(order),
     customer: String(order.customerName || order.userName || order.name || 'Customer').trim(),
     phone: String(order.userMobile || order.customerNumber || order.phoneNumber || ''),
     orderStatus: String(order.status || ''),

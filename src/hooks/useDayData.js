@@ -4,8 +4,8 @@ import {
 } from '../firebase';
 import { buildB2cRow, isCancelledOrder, b2cTotals, b2bTotals } from '../lib/orders';
 
-/** Live B2C rows + B2B entries for one day, with totals. Three listeners per day. */
-export default function useDayData(day, enabled) {
+/** Live B2C rows + B2B entries whose pickup/entry day is in [from, to], with totals. */
+export default function useRangeData({ from, to }, enabled) {
   const [orders, setOrders] = useState(null);
   const [verifications, setVerifications] = useState(null);
   const [b2b, setB2b] = useState(null);
@@ -27,24 +27,28 @@ export default function useDayData(day, enabled) {
         : 'Could not load data. Check your connection and refresh.');
     };
     const unsubs = [
-      subscribeB2cOrders(day, (list) => setOrders(list.filter((o) => !isCancelledOrder(o))), onError),
-      subscribeVerifications(day, setVerifications, onError),
-      subscribeB2bEntries(day, setB2b, onError),
+      subscribeB2cOrders(from, to, (list) => setOrders(list.filter((o) => !isCancelledOrder(o))), onError),
+      subscribeVerifications(from, to, setVerifications, onError),
+      subscribeB2bEntries(from, to, setB2b, onError),
     ];
     return () => unsubs.forEach((u) => u());
-  }, [day, enabled]);
+  }, [from, to, enabled]);
 
   const b2cRows = useMemo(() => (orders && verifications
     ? orders.map((o) => buildB2cRow(o, verifications[o.id], categories))
-      .sort((a, b) => a.customer.localeCompare(b.customer))
-    : []), [orders, verifications, categories]);
+      .filter((r) => r.pickupDay >= from && r.pickupDay <= to)
+      .sort((a, b) => b.pickupDay.localeCompare(a.pickupDay) || a.customer.localeCompare(b.customer))
+    : []), [orders, verifications, categories, from, to]);
+
+  const b2c = useMemo(() => b2cTotals(b2cRows), [b2cRows]);
+  const b2bSum = useMemo(() => b2bTotals(b2b || []), [b2b]);
 
   return {
     loading: !error && (orders === null || verifications === null || b2b === null),
     error,
     b2cRows,
     b2bEntries: b2b || [],
-    b2c: useMemo(() => b2cTotals(b2cRows), [b2cRows]),
-    b2bSum: useMemo(() => b2bTotals(b2b || []), [b2b]),
+    b2c,
+    b2bSum,
   };
 }

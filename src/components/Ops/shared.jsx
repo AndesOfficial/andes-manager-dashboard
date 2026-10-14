@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, ChevronLeft, ChevronRight, CheckCircle2, Pencil, Ban, RotateCcw, Loader2, History, Lock } from 'lucide-react';
+import { X, CheckCircle2, Pencil, Ban, RotateCcw, Loader2, History, Lock } from 'lucide-react';
 
 export const todayStr = () => {
   const d = new Date();
@@ -40,18 +40,48 @@ export function Sheet({ title, onClose, children }) {
   );
 }
 
-/** One date for the whole dashboard: ‹ [date] › Today */
-export function DateBar({ day, onChange, children }) {
-  const isToday = day === todayStr();
+const PRESETS = [
+  { id: 'today', label: 'Today', range: () => ({ from: todayStr(), to: todayStr() }) },
+  { id: 'yesterday', label: 'Yesterday', range: () => ({ from: shiftDay(todayStr(), -1), to: shiftDay(todayStr(), -1) }) },
+  { id: 'week', label: 'Last 7 days', range: () => ({ from: shiftDay(todayStr(), -6), to: todayStr() }) },
+  { id: 'month', label: 'This month', range: () => ({ from: `${todayStr().slice(0, 8)}01`, to: todayStr() }) },
+];
+
+export const rangeLabel = ({ from, to }) => (from === to ? fmtDay(from) : `${fmtDay(from)} – ${fmtDay(to)}`);
+
+/** From–to range for the whole dashboard, with quick presets. */
+export function RangeBar({ range, onChange }) {
+  const active = PRESETS.find((p) => { const r = p.range(); return r.from === range.from && r.to === range.to; });
+  const set = (from, to) => onChange(from <= to ? { from, to } : { from: to, to: from });
   return (
-    <div className="inv-datebar">
-      <div className="inv-date-nav">
-        <button className="icon-btn" onClick={() => onChange(shiftDay(day, -1))} title="Previous day"><ChevronLeft size={18} /></button>
-        <input className="form-input inv-date" type="date" value={day} max={todayStr()} onChange={(e) => e.target.value && onChange(e.target.value)} />
-        <button className="icon-btn" onClick={() => onChange(shiftDay(day, 1))} disabled={isToday} title="Next day"><ChevronRight size={18} /></button>
-        {!isToday && <button className="chip" onClick={() => onChange(todayStr())}>Today</button>}
+    <div className="range-bar">
+      <div className="chip-row scroll range-presets">
+        {PRESETS.map((p) => (
+          <button key={p.id} className={`chip ${active?.id === p.id ? 'chip-active' : ''}`} onClick={() => onChange(p.range())}>{p.label}</button>
+        ))}
       </div>
-      {children}
+      <div className="range-inputs">
+        <label><span>From</span>
+          <input className="form-input" type="date" value={range.from} max={todayStr()} onChange={(e) => e.target.value && set(e.target.value, range.to)} />
+        </label>
+        <label><span>To</span>
+          <input className="form-input" type="date" value={range.to} max={todayStr()} onChange={(e) => e.target.value && set(range.from, e.target.value)} />
+        </label>
+      </div>
+    </div>
+  );
+}
+
+/** Colored stat tile in the same style as the rest of the site. */
+export function Tile({ tone = 'blue', icon, label, value, sub }) {
+  return (
+    <div className={`widget-card widget-${tone} ops-tile`}>
+      <div className="widget-header">
+        <span className="widget-label">{label}</span>
+        {icon && <div className={`widget-circle-icon icon-${tone}`}>{icon}</div>}
+      </div>
+      <div className="widget-value">{value}</div>
+      {sub && <div className="ops-tile-sub">{sub}</div>}
     </div>
   );
 }

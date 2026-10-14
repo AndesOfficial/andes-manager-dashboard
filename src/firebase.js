@@ -99,45 +99,38 @@ export async function fetchServiceCategories() {
   return map;
 }
 
-/* ---- date helpers: day = 'YYYY-MM-DD' in local time ---- */
+/* ---- date helpers: day = 'YYYY-MM-DD' in India time ---- */
 
-const dayStart = (day) => new Date(`${day}T00:00:00`);
-const nextDay = (day) => { const d = dayStart(day); d.setDate(d.getDate() + 1); return d; };
+const dayStart = (day) => new Date(`${day}T00:00:00+05:30`);
+const dayAfter = (day, n = 1) => new Date(dayStart(day).getTime() + n * 86400000);
+const tsRange = (field, from, to) => [
+  where(field, '>=', Timestamp.fromDate(dayStart(from))),
+  where(field, '<', Timestamp.fromDate(dayAfter(to))),
+];
 
 const actor = () => auth.currentUser?.email || '';
 const historyEntry = (action, reason = '', changes = []) => ({
   at: new Date().toISOString(), by: actor(), action, reason, changes,
 });
 
-/* ---- B2C: rider orders (`cartdetails`) for one pickup day ---- */
+/* ---- B2C: rider orders (`cartdetails`) ---- */
 
-// Rider app writes scheduledPickupDate (Timestamp) and/or pickupDate ('YYYY-MM-DD').
-// Two single-field queries, merged by id — no composite index needed.
-export function subscribeB2cOrders(day, callback, onError) {
-  const col = collection(db, 'cartdetails');
-  const parts = [new Map(), new Map()];
-  const ready = [false, false];
-  const emit = () => {
-    if (!ready[0] || !ready[1]) return;
-    callback([...new Map([...parts[0], ...parts[1]]).values()]);
-  };
-  const listen = (q, i) => onSnapshot(q, (snap) => {
-    parts[i] = new Map(snap.docs.map((d) => [d.id, { id: d.id, ...d.data() }]));
-    ready[i] = true;
-    emit();
-  }, onError);
-  const unsubs = [
-    listen(query(col, where('scheduledPickupDate', '>=', Timestamp.fromDate(dayStart(day))),
-      where('scheduledPickupDate', '<', Timestamp.fromDate(nextDay(day)))), 0),
-    listen(query(col, where('pickupDate', '==', day)), 1),
-  ];
-  return () => unsubs.forEach((u) => u());
+// Pickup day lives in different fields per app version (see pickupDay()), so
+// load by createdAt — every order has it — from a week before the range, and
+// let the caller keep orders whose pickup day falls inside the range.
+export const PICKUP_LOOKBACK_DAYS = 7;
+
+export function subscribeB2cOrders(from, to, callback, onError) {
+  const q = query(collection(db, 'cartdetails'),
+    where('createdAt', '>=', Timestamp.fromDate(dayAfter(from, -PICKUP_LOOKBACK_DAYS))),
+    where('createdAt', '<', Timestamp.fromDate(dayAfter(to))));
+  return onSnapshot(q, (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }))), onError);
 }
 
 const verCol = collection(db, 'managerVerifications');
 
-export function subscribeVerifications(day, callback, onError) {
-  return onSnapshot(query(verCol, where('pickupDate', '==', day)), (snap) => {
+export function subscribeVerifications(from, to, callback, onError) {
+  return onSnapshot(query(verCol, where('pickupDate', '>=', from), where('pickupDate', '<=', to)), (snap) => {
     callback(Object.fromEntries(snap.docs.map((d) => [d.id, d.data()])));
   }, onError);
 }
@@ -146,7 +139,7 @@ export function subscribeVerifications(day, callback, onError) {
  * Verify / correct / cancel / restore a B2C order. Never touches `cartdetails`,
  * so the customer's bill is unaffected. Refuses once Admin has counted it.
  */
-export async function saveB2cVerification(row, day, action, { lines, reason = '', changes = [] } = {}) {
+export async function saveB2cVerification(row, action, { lines, reason = '', changes = [] } = {}) {
   const ref = doc(verCol, row.id);
   await runTransaction(db, async (tx) => {
     const snap = await tx.get(ref);
@@ -156,7 +149,7 @@ export async function saveB2cVerification(row, day, action, { lines, reason = ''
     tx.set(ref, {
       source: 'b2c',
       orderId: row.id,
-      pickupDate: day,
+      pickupDate: row.pickupDay,
       customer: row.customer,
       status,
       riderSig: row.riderSig,
@@ -177,10 +170,10 @@ export async function saveB2cVerification(row, day, action, { lines, reason = ''
 const b2bEntryCol = collection(db, 'managerB2bEntries');
 const slug = (s) => String(s || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'x';
 
-export function subscribeB2bEntries(day, callback, onError) {
-  return onSnapshot(query(b2bEntryCol, where('date', '==', day)), (snap) => {
+export function subscribeB2bEntries(from, to, callback, onError) {
+  return onSnapshot(query(b2bEntryCol, where('date', '>=', from), where('date', '<=', to)), (snap) => {
     callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }))
-      .sort((a, b) => a.client.localeCompare(b.client) || String(a.batchNo).localeCompare(String(b.batchNo))));
+      .sort((a, b) => b.date.localeCompare(a.date) || a.client.localeCompare(b.client) || String(a.batchNo).localeCompare(String(b.batchNo))));
   }, onError);
 }
 
@@ -226,9 +219,8 @@ export async function updateB2bEntry(id, action, { patch = {}, reason = '', chan
 
 /* ---- store-app B2B orders for the same day (reference only, never totalled) ---- */
 
-export async function fetchStoreB2bReference(day) {
-  const range = [where('createdAt', '>=', Timestamp.fromDate(dayStart(day))), where('createdAt', '<', Timestamp.fromDate(nextDay(day)))];
-  const snap = await getDocs(query(collection(db, 'hostels_orders'), ...range));
+export async function fetchStoreB2bReference(from, to) {
+  const snap = await getDocs(query(collection(db, 'hostels_orders'), ...tsRange('createdAt', from, to)));
   const byClient = {};
   snap.docs.forEach((d) => {
     const o = d.data();

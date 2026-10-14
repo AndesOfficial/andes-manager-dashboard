@@ -7,8 +7,8 @@ import OverviewTab from './components/Ops/OverviewTab';
 import B2CTab from './components/Ops/B2CTab';
 import B2BTab from './components/Ops/B2BTab';
 import ArchiveTab from './components/Ops/ArchiveTab';
-import { DateBar, todayStr, fmtDay } from './components/Ops/shared';
-import useDayData from './hooks/useDayData';
+import { RangeBar, todayStr, rangeLabel } from './components/Ops/shared';
+import useRangeData from './hooks/useDayData';
 import {
   subscribeHostels, subscribeAuth, signIn, signOut, isAllowedUser, isManagerUser,
 } from './firebase';
@@ -28,7 +28,7 @@ export default function App() {
   const [user, setUser] = useState(undefined); // undefined = checking
   const [authError, setAuthError] = useState('');
   const [tab, setTab] = useState('overview');
-  const [day, setDay] = useState(todayStr());
+  const [range, setRange] = useState(() => ({ from: todayStr(), to: todayStr() }));
   const [focusId, setFocusId] = useState(null);
   const [adding, setAdding] = useState(false);
   const [hostels, setHostels] = useState([]);
@@ -39,7 +39,7 @@ export default function App() {
 
   const isAdmin = user && isAllowedUser(user);
   const canUseApp = !!(isAdmin || (user && isManagerUser(user)));
-  const data = useDayData(day, canUseApp);
+  const data = useRangeData(range, canUseApp);
 
   /* network listener */
   useEffect(() => {
@@ -198,7 +198,7 @@ export default function App() {
           <div className="main-title-wrap">
             <h1>{current.title}</h1>
             <p>{isDayTab
-              ? `${fmtDay(day)} · ${toVerify ? `${toVerify} to verify` : 'all verified'}`
+              ? `${rangeLabel(range)} · ${toVerify ? `${toVerify} to verify` : 'all verified'}`
               : tab === 'inventory' ? 'Daily stock, cleanliness, vehicle & utility log' : 'Old hand-typed records'}</p>
           </div>
           <div className="header-actions">{addButton}</div>
@@ -225,16 +225,16 @@ export default function App() {
 
         {/* Active Tab Panel */}
         <div className="tab-content-panel">
-          {isDayTab && <DateBar day={day} onChange={(d) => { setDay(d); setFocusId(null); }} />}
+          {isDayTab && <RangeBar range={range} onChange={(r) => { setRange(r); setFocusId(null); }} />}
           {isDayTab && data.error && <div className="form-error" style={{ marginBottom: 12 }}>{data.error}</div>}
           {isDayTab && data.loading ? (
-            <div className="loading-state"><Loader2 size={22} className="spin" /><span>Loading {fmtDay(day)}…</span></div>
+            <div className="loading-state"><Loader2 size={22} className="spin" /><span>Loading {rangeLabel(range)}…</span></div>
           ) : tab === 'overview' ? (
             <OverviewTab b2c={data.b2c} b2bSum={data.b2bSum} onGo={go} />
           ) : tab === 'b2b' ? (
-            <B2BTab day={day} entries={data.b2bEntries} clients={hostels} adding={adding} onAddClose={() => setAdding(false)} />
+            <B2BTab range={range} entries={data.b2bEntries} clients={hostels} adding={adding} onAddClose={() => setAdding(false)} />
           ) : tab === 'b2c' ? (
-            <B2CTab day={day} rows={data.b2cRows} focusId={focusId} />
+            <B2CTab rows={data.b2cRows} focusId={focusId} />
           ) : tab === 'inventory' ? (
             <InventoryTab />
           ) : (

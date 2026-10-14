@@ -3,18 +3,18 @@ import { Plus, Trash2, Loader2, Info } from 'lucide-react';
 import { addB2bEntry, updateB2bEntry, fetchStoreB2bReference } from '../../firebase';
 import { num, round1 } from '../../lib/orders';
 import {
-  fmtKg, fmtDay, EmptyState, Sheet, StatusBadge, RowActions, ReasonSheet, HistoryList,
+  fmtKg, fmtDay, todayStr, EmptyState, Sheet, StatusBadge, RowActions, ReasonSheet, HistoryList,
   STATUS_FILTERS, matchesFilter,
 } from './shared';
 
 const EDIT_FIELDS = [['kg', 'KG'], ['clothes', 'Clothes'], ['note', 'Note']];
 
 /** Add (entry = null) or correct an existing B2B entry. */
-function EntrySheet({ entry, day, clients, onClose }) {
+function EntrySheet({ entry, defaultDate, clients, onClose }) {
   const isEdit = !!entry;
   const [form, setForm] = useState(() => entry
     ? { ...entry, items: entry.items || [] }
-    : { client: clients[0] || '', batchNo: '1', kg: '', clothes: '', items: [], note: '' });
+    : { client: clients[0] || '', date: defaultDate, batchNo: '1', kg: '', clothes: '', items: [], note: '' });
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -46,18 +46,23 @@ function EntrySheet({ entry, day, clients, onClose }) {
         if (!reason.trim()) throw new Error('Write why you are changing this entry.');
         await updateB2bEntry(entry.id, 'edit', { patch: clean, reason: reason.trim(), changes });
       } else {
-        await addB2bEntry({ ...clean, client: form.client.trim(), batchNo: String(form.batchNo || '1').trim(), date: day });
+        await addB2bEntry({ ...clean, client: form.client.trim(), batchNo: String(form.batchNo || '1').trim(), date: form.date });
       }
       onClose();
     } catch (err) { setError(err.message); setSaving(false); }
   };
 
   return (
-    <Sheet title={isEdit ? `Correct ${entry.client}` : `New B2B entry · ${fmtDay(day)}`} onClose={onClose}>
+    <Sheet title={isEdit ? `Correct ${entry.client}` : 'New B2B entry'} onClose={onClose}>
       <form onSubmit={submit}>
         {isEdit ? (
           <p className="ops-hint">{entry.client} · batch {entry.batchNo} · {fmtDay(entry.date)}. Editing sends it back to “To verify”. To change the client or date, cancel this entry and add a new one.</p>
         ) : (
+          <>
+          <div className="form-row">
+            <label className="form-label">Date</label>
+            <input className="form-input" type="date" value={form.date} max={todayStr()} onChange={(e) => set('date', e.target.value)} />
+          </div>
           <div className="form-row two-col">
             <div>
               <label className="form-label">Client</label>
@@ -70,6 +75,7 @@ function EntrySheet({ entry, day, clients, onClose }) {
               <input className="form-input" value={form.batchNo} onChange={(e) => set('batchNo', e.target.value)} placeholder="1" />
             </div>
           </div>
+          </>
         )}
         <div className="form-row two-col">
           <div>
@@ -123,11 +129,11 @@ function EntryRow({ entry, onEdit, onCancel }) {
     setBusy(false);
   };
   return (
-    <div className="card ops-row">
+    <div className={`card ops-row ops-st-${entry.status}`}>
       <div className="card-top">
         <div>
           <div className="card-name">{entry.client}</div>
-          <div className="ops-muted">Batch {entry.batchNo}{entry.note && ` · ${entry.note}`}</div>
+          <div className="ops-muted">{fmtDay(entry.date)} · Batch {entry.batchNo}{entry.note && ` · ${entry.note}`}</div>
         </div>
         <div className="ops-row-kg">{fmtKg(entry.kg)}<div className="ops-muted">{entry.clothes} clothes</div></div>
       </div>
@@ -143,14 +149,14 @@ function EntryRow({ entry, onEdit, onCancel }) {
   );
 }
 
-function StoreReference({ day, entries }) {
+function StoreReference({ range, entries }) {
   const [rows, setRows] = useState(null);
   useEffect(() => {
     let alive = true;
     setRows(null);
-    fetchStoreB2bReference(day).then((r) => alive && setRows(r)).catch(() => alive && setRows([]));
+    fetchStoreB2bReference(range.from, range.to).then((r) => alive && setRows(r)).catch(() => alive && setRows([]));
     return () => { alive = false; };
-  }, [day]);
+  }, [range.from, range.to]);
   if (!rows?.length) return null;
   const entered = (client) => entries.filter((e) => e.client === client && e.status !== 'cancelled')
     .reduce((s, e) => s + num(e.clothes), 0);
@@ -176,7 +182,7 @@ function StoreReference({ day, entries }) {
   );
 }
 
-export default function B2BTab({ day, entries, clients, adding, onAddClose }) {
+export default function B2BTab({ range, entries, clients, adding, onAddClose }) {
   const [filter, setFilter] = useState('all');
   const [editing, setEditing] = useState(null);
   const [cancelling, setCancelling] = useState(null);
@@ -191,19 +197,19 @@ export default function B2BTab({ day, entries, clients, adding, onAddClose }) {
         ))}
       </div>
       {entries.length === 0 ? (
-        <EmptyState title="No B2B entries for this day" sub="Tap “Add B2B entry” to log a client batch." />
+        <EmptyState title="No B2B entries for these dates" sub="Tap “Add B2B entry” to log a client batch." />
       ) : list.length === 0 ? (
         <EmptyState title="No matches" sub="Try another filter." />
       ) : (
-        <div className="list">
+        <div className="ops-cards">
           {list.map((e) => <EntryRow key={e.id} entry={e} onEdit={setEditing} onCancel={setCancelling} />)}
         </div>
       )}
 
-      <StoreReference day={day} entries={entries} />
+      <StoreReference range={range} entries={entries} />
 
       {(adding || editing) && (
-        <EntrySheet entry={editing} day={day} clients={clients}
+        <EntrySheet entry={editing} defaultDate={range.to} clients={clients}
           onClose={() => { setEditing(null); onAddClose(); }} />
       )}
       {cancelling && (
