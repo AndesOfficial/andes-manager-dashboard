@@ -9,6 +9,51 @@ import {
 
 const EDIT_FIELDS = [['kg', 'KG'], ['clothes', 'Clothes'], ['note', 'Note']];
 
+export const ONE8_CATALOGUE = [
+  'Wiping Cloth',
+  'Chef Coat',
+  'T-Shirt',
+  'Pant',
+  'Apron',
+  'Napkin',
+  'Blazer',
+  'Cap',
+];
+
+export const ZOLO_CATALOGUE = [
+  'Single Bedsheet',
+  'Double Bedsheet',
+  'Duvet Cover',
+  'Pillow Cover',
+  'Bath towel',
+  'Blanket',
+  'Curtain',
+  'Door mat',
+];
+
+export const STANDARD_B2B_CATALOGUE = [
+  'Single Bedsheet',
+  'Double Bedsheet',
+  'Duvet Cover',
+  'Pillow Cover',
+  'Bath towel',
+  'Blanket',
+  'Curtain',
+  'Door mat',
+];
+
+export function getClientCatalogue(clientName) {
+  if (!clientName) return STANDARD_B2B_CATALOGUE;
+  const lower = clientName.trim().toLowerCase();
+  if (lower.includes('one 8') || lower.includes('one8')) {
+    return ONE8_CATALOGUE;
+  }
+  if (lower.includes('zolo')) {
+    return ZOLO_CATALOGUE;
+  }
+  return STANDARD_B2B_CATALOGUE;
+}
+
 /** Add (entry = null) or correct an existing B2B entry. */
 function EntrySheet({ entry, defaultDate, clients, onClose }) {
   const isEdit = !!entry;
@@ -21,8 +66,30 @@ function EntrySheet({ entry, defaultDate, clients, onClose }) {
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const setItem = (i, k, v) => set('items', form.items.map((it, j) => (j === i ? { ...it, [k]: v } : it)));
 
+  const clientCatalogue = useMemo(() => getClientCatalogue(form.client), [form.client]);
+
   // Item breakdown, when filled, decides the clothes count.
   const itemTotal = form.items.reduce((s, it) => s + num(it.qty), 0);
+
+  const addFromCatalogue = (itemName) => {
+    const existingIndex = form.items.findIndex((it) => it.name.toLowerCase() === itemName.toLowerCase());
+    if (existingIndex >= 0) {
+      setItem(existingIndex, 'qty', num(form.items[existingIndex].qty) + 1);
+    } else {
+      set('items', [...form.items, { name: itemName, qty: 1 }]);
+    }
+  };
+
+  const prefillCatalogue = () => {
+    const existingNames = new Set(form.items.map((it) => it.name.toLowerCase()));
+    const newItems = [...form.items];
+    clientCatalogue.forEach((name) => {
+      if (!existingNames.has(name.toLowerCase())) {
+        newItems.push({ name, qty: '' });
+      }
+    });
+    set('items', newItems);
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -91,15 +158,71 @@ function EntrySheet({ entry, defaultDate, clients, onClose }) {
         </div>
 
         <div className="form-row">
-          <label className="form-label">Item breakdown <span className="ops-muted">(optional — for per-piece clients)</span></label>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+            <label className="form-label" style={{ marginBottom: 0 }}>
+              Item breakdown <span className="ops-muted">({form.client ? `${form.client} catalogue` : 'catalogue or manual'})</span>
+            </label>
+            <button type="button" className="chip" onClick={prefillCatalogue} style={{ fontSize: 11 }}>
+              Pre-fill catalogue
+            </button>
+          </div>
+
+          <datalist id="b2b-items-catalogue">
+            {clientCatalogue.map((catName) => (
+              <option key={catName} value={catName} />
+            ))}
+          </datalist>
+
+          {/* Quick-add chips from catalogue */}
+          <div className="chip-row scroll" style={{ marginBottom: 8, paddingBottom: 4 }}>
+            {clientCatalogue.map((catItem) => (
+              <button
+                key={catItem}
+                type="button"
+                className="chip"
+                onClick={() => addFromCatalogue(catItem)}
+                title={`Add ${catItem}`}
+              >
+                <Plus size={11} /> {catItem}
+              </button>
+            ))}
+          </div>
+
           {form.items.map((it, i) => (
             <div className="ops-item-row" key={i}>
-              <input className="form-input" placeholder="Item, e.g. Double bedsheet" value={it.name} onChange={(e) => setItem(i, 'name', e.target.value)} />
-              <input className="form-input ops-qty" type="number" min="0" inputMode="numeric" placeholder="Qty" value={it.qty} onChange={(e) => setItem(i, 'qty', e.target.value)} />
-              <button type="button" className="icon-btn" onClick={() => set('items', form.items.filter((_, j) => j !== i))}><Trash2 size={15} /></button>
+              <input
+                className="form-input"
+                list="b2b-items-catalogue"
+                placeholder="Item (catalogue or type custom)"
+                value={it.name}
+                onChange={(e) => setItem(i, 'name', e.target.value)}
+              />
+              <input
+                className="form-input ops-qty"
+                type="number"
+                min="0"
+                inputMode="numeric"
+                placeholder="Qty"
+                value={it.qty}
+                onChange={(e) => setItem(i, 'qty', e.target.value)}
+              />
+              <button
+                type="button"
+                className="icon-btn"
+                onClick={() => set('items', form.items.filter((_, j) => j !== i))}
+              >
+                <Trash2 size={15} />
+              </button>
             </div>
           ))}
-          <button type="button" className="chip" onClick={() => set('items', [...form.items, { name: '', qty: '' }])}><Plus size={12} /> Add item</button>
+
+          <button
+            type="button"
+            className="chip"
+            onClick={() => set('items', [...form.items, { name: '', qty: '' }])}
+          >
+            <Plus size={12} /> Add custom item
+          </button>
         </div>
 
         <div className="form-row">
@@ -141,7 +264,7 @@ function EntryRow({ entry, onEdit, onCancel }) {
         <div className="svc-items">{entry.items.map((it) => `${it.name} × ${it.qty}`).join(', ')}</div>
       )}
       <div className="card-badges"><StatusBadge status={entry.status} locked={!!entry.adminLockedAt} /></div>
-      <RowActions status={entry.status} locked={!!entry.adminLockedAt} busy={busy}
+      <RowActions status={entry.status} locked={!!entry.adminLockedAt} busy={busy} isB2b={true}
         onVerify={() => run('verify')} onRestore={() => run('restore')}
         onEdit={() => onEdit(entry)} onCancel={() => onCancel(entry)} />
       <HistoryList history={entry.history} />
@@ -186,6 +309,14 @@ export default function B2BTab({ range, entries, clients, adding, onAddClose }) 
   const [filter, setFilter] = useState('all');
   const [editing, setEditing] = useState(null);
   const [cancelling, setCancelling] = useState(null);
+
+  const clientList = useMemo(() => Array.from(new Set([
+    ...(clients || []),
+    'One 8',
+    'Zolo stays',
+    ...entries.map((e) => e.client),
+  ])).filter(Boolean).sort(), [clients, entries]);
+
   const counts = useMemo(() => Object.fromEntries(STATUS_FILTERS.map((f) => [f.id, entries.filter((e) => matchesFilter(e.status, f.id)).length])), [entries]);
   const list = entries.filter((e) => matchesFilter(e.status, filter));
 
@@ -209,7 +340,7 @@ export default function B2BTab({ range, entries, clients, adding, onAddClose }) 
       <StoreReference range={range} entries={entries} />
 
       {(adding || editing) && (
-        <EntrySheet entry={editing} defaultDate={range.to} clients={clients}
+        <EntrySheet entry={editing} defaultDate={range.to} clients={clientList}
           onClose={() => { setEditing(null); onAddClose(); }} />
       )}
       {cancelling && (

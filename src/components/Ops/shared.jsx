@@ -114,7 +114,7 @@ export const matchesFilter = (status, filter) => filter === 'all'
   || status === filter;
 
 /** Verify / Edit / Cancel (or Restore) buttons shared by B2B and B2C rows. */
-export function RowActions({ status, locked, busy, onVerify, onEdit, onCancel, onRestore }) {
+export function RowActions({ status, locked, busy, onVerify, onEdit, onCancel, onRestore, isB2b = false }) {
   if (locked) return null;
   if (status === 'cancelled') {
     return (
@@ -122,6 +122,10 @@ export function RowActions({ status, locked, busy, onVerify, onEdit, onCancel, o
         <button className="btn-ghost" disabled={busy} onClick={onRestore}><RotateCcw size={14} /> Restore</button>
       </div>
     );
+  }
+  // In B2B, manager is not allowed to edit or cancel after verification
+  if (isB2b && status === 'verified') {
+    return null;
   }
   return (
     <div className="row-actions">

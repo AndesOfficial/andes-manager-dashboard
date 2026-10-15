@@ -107,6 +107,84 @@ export function pickupDay(o) {
 }
 
 /** Rider-recorded order weight, newest field first. */
+/** Assumed average weights (in kg) for bedsheets and per-piece items. Easily editable. */
+export const ITEM_AVERAGE_WEIGHTS = {
+  'single bedsheet': 0.5,
+  'double bedsheet': 0.8,
+  'bedsheet': 0.5,
+  'duvet cover': 1.0,
+  'pillow cover': 0.15,
+  'pillow': 0.5,
+  'bath towel': 0.4,
+  'towel': 0.35,
+  'hand towel': 0.15,
+  'face towel': 0.1,
+  'bath mat': 0.3,
+  'blanket': 1.8,
+  'quilt': 2.0,
+  'curtain': 1.0,
+  'door mat': 0.4,
+  'shirt': 0.25,
+  't-shirt': 0.2,
+  'pant': 0.45,
+  'trousers': 0.45,
+  'jeans': 0.6,
+  'kurta': 0.3,
+  'saree': 0.45,
+  'suit': 1.0,
+  'blazer': 0.8,
+  'coat': 0.8,
+  'jacket': 0.7,
+  'chef coat': 0.4,
+  'apron': 0.2,
+  'wiping cloth': 0.05,
+  'napkin': 0.05,
+  'cap': 0.1,
+};
+
+export function getEstimatedItemWeight(name) {
+  if (!name) return 0;
+  const n = String(name).toLowerCase().trim();
+  if (ITEM_AVERAGE_WEIGHTS[n] !== undefined) return ITEM_AVERAGE_WEIGHTS[n];
+  for (const [key, wt] of Object.entries(ITEM_AVERAGE_WEIGHTS)) {
+    if (n.includes(key)) return wt;
+  }
+  return 0;
+}
+
+/** 5 standard order / lead types: other, whatsapp, user app, walk in, website */
+export const LEAD_SOURCE_TYPES = [
+  { id: 'all', label: 'All Leads' },
+  { id: 'user_app', label: 'User App' },
+  { id: 'website', label: 'Website' },
+  { id: 'whatsapp', label: 'WhatsApp' },
+  { id: 'walk_in', label: 'Walk In' },
+  { id: 'other', label: 'Other' },
+];
+
+export function getOrderLeadSource(order) {
+  if (!order) return 'other';
+  // 1. Explicit leadSource / orderSource / source field (set by Rider app or system)
+  const raw = String(order.leadSource || order.orderSource || order.source || '').toLowerCase().trim();
+  if (raw === 'whatsapp') return 'whatsapp';
+  if (raw === 'walk in' || raw === 'walk_in' || raw === 'walkin') return 'walk_in';
+  if (raw === 'website' || raw === 'web') return 'website';
+  if (raw === 'user app' || raw === 'user_app' || raw === 'app') return 'user_app';
+  if (raw === 'other') return 'other';
+
+  // 2. Detection from order location / selectionSource
+  const locSource = String(order.location?.selectionSource || '').toLowerCase();
+  if (locSource === 'website' || order.selectionSource === 'website') return 'website';
+
+  // 3. User app orders vs rider-created orders without leadSource
+  if (order.riderId && !order.paymentMethod && !order.paymentData) {
+    return 'other';
+  }
+
+  return 'user_app';
+}
+
+/** Rider-recorded order weight, newest field first. */
 const orderWeight = (o) => num(o.riderRecordedWeightKg ?? o.clothesWeightKg ?? o.internalWeightKg ?? o.weightKg ?? o.weight);
 
 /** Lines as the rider recorded them: [{ name, group, kg, qty }]. */
@@ -125,7 +203,11 @@ export function riderLines(order, categories) {
       const clothes = num(d.count) || (kgCount === 1 ? num(order.clothesCount) : 0);
       return { name, group, kg: round1(kg), qty: clothes };
     }
-    return { name, group, kg: 0, qty };
+    // Per-piece items (bedsheets, blankets, towels, dry clean, iron):
+    // Add estimated average weight into total kgs processed
+    const avgWt = getEstimatedItemWeight(name);
+    const estKg = avgWt > 0 ? round1(qty * avgWt) : 0;
+    return { name, group, kg: estKg, qty };
   });
 }
 
@@ -148,9 +230,11 @@ export function buildB2cRow(order, verification, categories) {
   let status = v.status || 'pending';
   if (status === 'verified' && v.riderSig && v.riderSig !== sig) status = 'changed';
   const lines = Array.isArray(v.lines) && status !== 'changed' ? v.lines : rider;
+  const leadSource = getOrderLeadSource(order);
   return {
     id: order.id,
     order,
+    leadSource,
     pickupDay: pickupDay(order),
     customer: String(order.customerName || order.userName || order.name || 'Customer').trim(),
     phone: String(order.userMobile || order.customerNumber || order.phoneNumber || ''),
@@ -188,9 +272,16 @@ export function b2cTotals(rows) {
 
 export function b2bTotals(entries) {
   const live = entries.filter((e) => e.status !== 'cancelled');
+  const totalKg = live.reduce((s, e) => {
+    const directKg = num(e.kg);
+    if (directKg > 0) return s + directKg;
+    // Fall back to estimated item weights if kg was not entered directly
+    const itemKg = (e.items || []).reduce((is, it) => is + (num(it.qty) * getEstimatedItemWeight(it.name)), 0);
+    return s + itemKg;
+  }, 0);
   return {
     entries: live.length,
-    kg: round1(live.reduce((s, e) => s + num(e.kg), 0)),
+    kg: round1(totalKg),
     clothes: live.reduce((s, e) => s + num(e.clothes), 0),
     verified: live.filter((e) => e.status === 'verified').length,
   };

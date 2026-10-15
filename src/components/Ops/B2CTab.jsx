@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Search, Loader2 } from 'lucide-react';
 import { saveB2cVerification } from '../../firebase';
-import { SERVICE_GROUPS, diffLines, num, round1 } from '../../lib/orders';
+import { SERVICE_GROUPS, diffLines, num, round1, LEAD_SOURCE_TYPES } from '../../lib/orders';
 import {
   fmtKg, fmtDay, EmptyState, Sheet, StatusBadge, RowActions, ReasonSheet, HistoryList,
   STATUS_FILTERS, matchesFilter,
@@ -98,6 +98,19 @@ function OrderRow({ row, highlight, onEdit, onCancel }) {
       </table>
       <div className="card-badges">
         <StatusBadge status={row.status} locked={row.locked} />
+        {row.leadSource && (
+          <span className={`badge ${
+            row.leadSource === 'whatsapp' ? 'badge-green' :
+            row.leadSource === 'website' ? 'badge-blue' :
+            row.leadSource === 'user_app' ? 'badge-purple' :
+            row.leadSource === 'walk_in' ? 'badge-amber' : 'badge-gray'
+          }`}>
+            {row.leadSource === 'user_app' ? 'User App' :
+             row.leadSource === 'walk_in' ? 'Walk In' :
+             row.leadSource === 'whatsapp' ? 'WhatsApp' :
+             row.leadSource === 'website' ? 'Website' : 'Other'}
+          </span>
+        )}
         {row.corrected && <span className="badge badge-blue">Corrected</span>}
       </div>
       <RowActions status={row.status} locked={row.locked} busy={busy}
@@ -111,21 +124,38 @@ function OrderRow({ row, highlight, onEdit, onCancel }) {
 export default function B2CTab({ rows, focusId }) {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('todo');
+  const [leadFilter, setLeadFilter] = useState('all');
   const [editing, setEditing] = useState(null);
   const [cancelling, setCancelling] = useState(null);
 
   useEffect(() => {
     if (!focusId) return;
     setFilter('all');
+    setLeadFilter('all');
     requestAnimationFrame(() => document.getElementById(`b2c-${focusId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
   }, [focusId]);
 
   const counts = useMemo(() => Object.fromEntries(STATUS_FILTERS.map((f) => [f.id, rows.filter((r) => matchesFilter(r.status, f.id)).length])), [rows]);
+
+  const leadCounts = useMemo(() => {
+    const c = { all: rows.length };
+    LEAD_SOURCE_TYPES.forEach((l) => { if (l.id !== 'all') c[l.id] = 0; });
+    rows.forEach((r) => {
+      const src = r.leadSource || 'other';
+      c[src] = (c[src] || 0) + 1;
+    });
+    return c;
+  }, [rows]);
+
   const list = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return rows.filter((r) => matchesFilter(r.status, filter)
-      && (!q || r.customer.toLowerCase().includes(q) || r.phone.includes(q) || r.id.toLowerCase().includes(q)));
-  }, [rows, search, filter]);
+    return rows.filter((r) => {
+      if (!matchesFilter(r.status, filter)) return false;
+      if (leadFilter !== 'all' && (r.leadSource || 'other') !== leadFilter) return false;
+      if (q && !r.customer.toLowerCase().includes(q) && !r.phone.includes(q) && !r.id.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [rows, search, filter, leadFilter]);
 
   // Keep the open sheet on the live row.
   const liveEditing = editing && rows.find((r) => r.id === editing.id);
@@ -141,6 +171,18 @@ export default function B2CTab({ rows, focusId }) {
       <div className="chip-row scroll">
         {STATUS_FILTERS.map((f) => (
           <button key={f.id} className={`chip ${filter === f.id ? 'chip-active' : ''}`} onClick={() => setFilter(f.id)}>{f.label} ({counts[f.id]})</button>
+        ))}
+      </div>
+      <div className="chip-row scroll" style={{ marginTop: 8 }}>
+        <span className="ops-muted" style={{ alignSelf: 'center', fontSize: 12, marginRight: 4 }}>Channel:</span>
+        {LEAD_SOURCE_TYPES.map((l) => (
+          <button
+            key={l.id}
+            className={`chip ${leadFilter === l.id ? 'chip-active' : ''}`}
+            onClick={() => setLeadFilter(l.id)}
+          >
+            {l.label} ({leadCounts[l.id] ?? 0})
+          </button>
         ))}
       </div>
 

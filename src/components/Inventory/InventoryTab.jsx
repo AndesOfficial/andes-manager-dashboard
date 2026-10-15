@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  ChevronLeft, ChevronRight, Save, Loader2, AlertTriangle, Sparkles, Bike, Zap, Droplets, Check, X, Plus,
+  ChevronLeft, ChevronRight, Save, Loader2, AlertTriangle, Sparkles, Zap, Check, X, Plus,
 } from 'lucide-react';
 import { subscribeInventoryLogs, saveInventoryLog } from '../../firebase';
 import JuteBagsSection from './JuteBagsSection';
-import { STOCK_SECTIONS, CLEANLINESS_AREAS, VEHICLES } from '../../config/inventoryItems';
+import { STOCK_SECTIONS, CLEANLINESS_AREAS } from '../../config/inventoryItems';
 
 /* ---------------- helpers ---------------- */
 
@@ -17,6 +17,10 @@ const shiftDate = (date, days) => {
   d.setDate(d.getDate() + days);
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 };
+const isWednesday = (dStr) => {
+  const d = new Date(dStr + 'T00:00:00+05:30');
+  return d.getDay() === 3;
+};
 const isBlank = (v) => v === '' || v === null || v === undefined;
 const num = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
 const round = (n) => Math.round(n * 100) / 100;
@@ -25,8 +29,7 @@ const fmtRowDate = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-IN', 
 
 const emptyLog = () => {
   const log = {
-    water: { filled: '', used: '', remaining: '' },
-    cleanliness: {}, vehicles: {}, vehicleIssues: '',
+    cleanliness: {},
     electricity: { start: '', end: '' }, notes: '',
   };
   STOCK_SECTIONS.forEach((s) => {
@@ -45,7 +48,6 @@ const hydrate = (saved) => {
     out[s.key] = { ...base[s.key] };
     s.items.forEach((it) => { out[s.key][it.key] = { ...base[s.key][it.key], ...(saved[s.key]?.[it.key] || {}) }; });
   });
-  out.water = { ...base.water, ...(saved.water || {}) };
   out.electricity = { ...base.electricity, ...(saved.electricity || {}) };
   return out;
 };
@@ -91,18 +93,39 @@ function NumInput({ value, onChange, placeholder = '0', ...rest }) {
 // `added` is their total.
 const addsOf = (row) => (Array.isArray(row.adds) ? row.adds : []);
 
-function StockRow({ item, row, opening, date, onChange }) {
+function StockRow({ item, row, opening, date, onChange, inputRemainingMode = false }) {
   const [open, setOpen] = useState(false);
   const [qty, setQty] = useState('');
   const [note, setNote] = useState('');
   const inventory = round(opening + num(row.added));
-  const remaining = remainingOf(row, opening);
+
+  // If inputRemainingMode (chemicals, stain removers):
+  // manager enters remaining. used = inventory - remaining.
+  // If standard mode (packaging, other):
+  // manager enters used. remaining = inventory - used.
+  const remaining = inputRemainingMode
+    ? (!isBlank(row.remaining) ? num(row.remaining) : inventory)
+    : remainingOf(row, opening);
+
+  const calculatedUsed = inputRemainingMode
+    ? (!isBlank(row.remaining) ? round(inventory - num(row.remaining)) : (row.used !== '' && row.used !== undefined ? row.used : '—'))
+    : row.used;
+
   const status = stockStatus(remaining, item);
   const adds = addsOf(row);
   // Days saved before entries existed only have a total.
   const legacy = adds.length === 0 && num(row.added) > 0 ? num(row.added) : 0;
 
-  const setAdds = (next) => onChange({ adds: next, added: round(next.reduce((t, e) => t + num(e.qty), 0)) });
+  const setAdds = (next) => {
+    const nextAdded = round(next.reduce((t, e) => t + num(e.qty), 0));
+    const nextInv = round(opening + nextAdded);
+    const patch = { adds: next, added: nextAdded };
+    if (inputRemainingMode && !isBlank(row.remaining)) {
+      patch.used = round(nextInv - num(row.remaining));
+    }
+    onChange(patch);
+  };
+
   const addEntry = () => {
     if (!(num(qty) > 0)) return;
     const base = legacy ? [{ qty: legacy, note: 'Earlier entry', at: '' }] : adds;
@@ -129,15 +152,34 @@ function StockRow({ item, row, opening, date, onChange }) {
           <span className="inv-badge-cell">{inventory}</span>
         </span>
         <span className="inv-cell col-used" data-label="Used">
-          <NumInput value={row.used} onChange={(v) => onChange({ used: v })} />
+          {inputRemainingMode ? (
+            <span className="inv-badge-cell inv-auto-used" title="Auto-calculated (Inventory − Remaining)">
+              {calculatedUsed}
+            </span>
+          ) : (
+            <NumInput value={row.used} onChange={(v) => onChange({ used: v })} />
+          )}
         </span>
         <span className="inv-cell col-rem" data-label="Remaining">
-          <NumInput
-            value={row.manual ? row.remaining : remaining}
-            className={`form-input inv-num ${row.manual ? 'inv-manual' : 'inv-auto'}`}
-            title="Auto-calculated. Type to override after a physical count."
-            onChange={(v) => onChange({ remaining: v, manual: v !== '' })}
-          />
+          {inputRemainingMode ? (
+            <NumInput
+              value={row.remaining}
+              className="form-input inv-num"
+              placeholder="0"
+              title="Enter current physical count / remaining stock."
+              onChange={(v) => {
+                const usedVal = !isBlank(v) ? round(inventory - num(v)) : '';
+                onChange({ remaining: v, used: usedVal, manual: true });
+              }}
+            />
+          ) : (
+            <NumInput
+              value={row.manual ? row.remaining : remaining}
+              className={`form-input inv-num ${row.manual ? 'inv-manual' : 'inv-auto'}`}
+              title="Auto-calculated. Type to override after a physical count."
+              onChange={(v) => onChange({ remaining: v, manual: v !== '' })}
+            />
+          )}
         </span>
         <span className="inv-cell inv-plus-cell col-act">
           <button type="button" className={`inv-plus ${open ? 'open' : ''}`} onClick={() => setOpen((o) => !o)}
@@ -169,12 +211,16 @@ function StockRow({ item, row, opening, date, onChange }) {
   );
 }
 
-function StockSection({ section, rows, openings, date, onChange }) {
+function StockSection({ section, rows, openings, date, onChange, inputRemainingMode = false }) {
   return (
     <section className="panel inv-section" id={`inv-${section.key}`}>
       <div className="inv-section-head">
         <div className="panel-title" style={{ marginBottom: 0 }}>{section.label}</div>
-        <span className="inv-hint">Tap + to log stock added · Remaining = inventory − used</span>
+        <span className="inv-hint">
+          {inputRemainingMode
+            ? 'Tap + to log stock added · Enter remaining (Used = inventory − remaining)'
+            : 'Tap + to log stock added · Remaining = inventory − used'}
+        </span>
       </div>
       <div className="inv-table">
         <div className="inv-tr inv-th">
@@ -187,7 +233,8 @@ function StockSection({ section, rows, openings, date, onChange }) {
         </div>
         {section.items.map((item) => (
           <StockRow key={item.key} item={item} row={rows[item.key]} opening={openings[item.key] ?? 0}
-            date={date} onChange={(patch) => onChange(item.key, patch)} />
+            date={date} inputRemainingMode={inputRemainingMode}
+            onChange={(patch) => onChange(item.key, patch)} />
         ))}
       </div>
     </section>
@@ -237,15 +284,18 @@ export default function InventoryTab() {
     return () => window.removeEventListener('beforeunload', warn);
   }, [dirty]);
 
-  // Opening stock = previous day's remaining.
+  // Opening stock = previous day's remaining (or latest previous logged remaining for weekly items).
   const openings = useMemo(() => {
     const out = {};
     STOCK_SECTIONS.forEach((s) => {
       out[s.key] = {};
-      s.items.forEach((it) => { out[s.key][it.key] = num(prevLog?.[s.key]?.[it.key]?.remaining); });
+      const lastLogWithSection = logs.find((l) => l.id < date && l[s.key] && Object.values(l[s.key]).some((it) => !isBlank(it?.remaining)));
+      s.items.forEach((it) => {
+        out[s.key][it.key] = num(lastLogWithSection?.[s.key]?.[it.key]?.remaining ?? prevLog?.[s.key]?.[it.key]?.remaining);
+      });
     });
     return out;
-  }, [prevLog]);
+  }, [logs, prevLog, date]);
 
   const edit = (fn) => { setLog((l) => fn(structuredClone(l))); setDirty(true); };
   const changeDate = (d) => {
@@ -255,19 +305,35 @@ export default function InventoryTab() {
     setDate(d);
   };
 
+  const wednesday = isWednesday(date);
+
+  // Visible stock sections based on Wednesday rule
+  const visibleStockSections = useMemo(() => {
+    if (wednesday) {
+      return [
+        ...STOCK_SECTIONS.filter((s) => s.key === 'packaging' || s.key === 'other'),
+        ...STOCK_SECTIONS.filter((s) => s.key === 'chemicals' || s.key === 'stainRemovers'),
+      ];
+    }
+    return STOCK_SECTIONS.filter((s) => s.key === 'chemicals' || s.key === 'stainRemovers');
+  }, [wednesday]);
+
   /* summary numbers */
   const lowItems = [];
-  STOCK_SECTIONS.forEach((s) => s.items.forEach((it) => {
-    const r = remainingOf(log[s.key][it.key], openings[s.key][it.key]);
+  visibleStockSections.forEach((s) => s.items.forEach((it) => {
+    const isRemMode = s.key === 'chemicals' || s.key === 'stainRemovers';
+    const row = log[s.key]?.[it.key] || {};
+    const op = openings[s.key]?.[it.key] || 0;
+    const r = isRemMode
+      ? (!isBlank(row.remaining) ? num(row.remaining) : round(op + num(row.added)))
+      : remainingOf(row, op);
     if (stockStatus(r, it) !== 'ok') lowItems.push(it.label);
   }));
+
   const cleanDone = CLEANLINESS_AREAS.filter((a) => log.cleanliness[a.key] === true).length;
-  const charged = VEHICLES.filter((v) => log.vehicles[v.key] === true).length;
   const elecStart = log.electricity.start;
   const elecEnd = log.electricity.end;
   const units = !isBlank(elecStart) && !isBlank(elecEnd) ? round(num(elecEnd) - num(elecStart)) : null;
-  const waterRemaining = !isBlank(log.water.remaining)
-    ? num(log.water.remaining) : round(num(log.water.filled) - num(log.water.used));
 
   const handleSave = async () => {
     setSaving(true);
@@ -279,9 +345,16 @@ export default function InventoryTab() {
         row.date = date;
         row.opening = openings[s.key][it.key];
         row.inventory = round(row.opening + num(row.added));
-        row.remaining = remainingOf(row, row.opening);
+        if (s.key === 'chemicals' || s.key === 'stainRemovers') {
+          if (!isBlank(row.remaining)) {
+            row.used = round(row.inventory - num(row.remaining));
+          } else {
+            row.remaining = round(row.inventory - num(row.used));
+          }
+        } else {
+          row.remaining = remainingOf(row, row.opening);
+        }
       }));
-      data.water.remaining = waterRemaining;
       data.electricity.units = units;
       if (savedForDate?.createdAt) data.createdAt = savedForDate.createdAt;
       await saveInventoryLog(date, data);
@@ -303,6 +376,17 @@ export default function InventoryTab() {
 
   const isToday = date === todayStr();
 
+  // Jump chips matching the required order
+  const chips = [
+    ...(wednesday ? [['packaging', 'Packaging'], ['other', 'Other things']] : []),
+    ['chemicals', 'Chemicals'],
+    ['stainRemovers', 'Stain removers'],
+    ['electricity', 'Electricity'],
+    ['cleanliness', 'Cleanliness'],
+    ['jutebags', 'Jute bags'],
+    ['history', 'History'],
+  ];
+
   return (
     <div className="inv-page">
       {/* date bar */}
@@ -312,6 +396,7 @@ export default function InventoryTab() {
           <input className="form-input inv-date" type="date" value={date} max={todayStr()} onChange={(e) => changeDate(e.target.value)} />
           <button className="icon-btn" onClick={() => changeDate(shiftDate(date, 1))} disabled={isToday} title="Next day"><ChevronRight size={18} /></button>
           {!isToday && <button className="chip" onClick={() => changeDate(todayStr())}>Today</button>}
+          {wednesday && <span className="badge badge-blue">Wednesday (Weekly Packaging Log)</span>}
         </div>
         <div className="inv-save-wrap">
           {dirty
@@ -329,93 +414,39 @@ export default function InventoryTab() {
       {error && <div className="form-error" style={{ marginBottom: 12 }}>{error}</div>}
       {!prevLog && <div className="inv-note">No earlier log found, so inventory starts at 0. Use the <b>+</b> button on a row to log today's stock.</div>}
 
-      {/* summary */}
-      <div className="overview-widgets-grid">
+      {/* summary: 3 widgets (Low stock, Cleanliness, Electricity) */}
+      <div className="overview-widgets-grid ops-grid-3">
         <Widget tone="red" icon={<AlertTriangle size={18} />} label="Low stock" value={lowItems.length}
           sub={lowItems.length ? lowItems.slice(0, 3).join(', ') + (lowItems.length > 3 ? ` +${lowItems.length - 3}` : '') : 'All stocked'} />
         <Widget tone="green" icon={<Sparkles size={18} />} label="Cleanliness" value={`${cleanDone}/${CLEANLINESS_AREAS.length}`} sub="areas cleaned" />
-        <Widget tone="purple" icon={<Bike size={18} />} label="Vehicles charged" value={`${charged}/${VEHICLES.length}`} sub={log.vehicleIssues ? 'Issue reported' : 'No issues'} />
-        <Widget tone="blue" icon={<Zap size={18} />} label="Electricity" value={units === null ? '—' : `${units} units`} sub={`Water left: ${waterRemaining} L`} />
+        <Widget tone="blue" icon={<Zap size={18} />} label="Electricity" value={units === null ? '—' : `${units} units`} sub={units !== null ? 'Units consumed' : 'Readings pending'} />
       </div>
 
       {/* section jump chips */}
       <div className="chip-row scroll inv-chips">
-        {[['jutebags', 'Jute bags'], ...STOCK_SECTIONS.map((s) => [s.key, s.label]), ['water', 'Water'], ['cleanliness', 'Cleanliness'], ['vehicles', 'Vehicles'], ['electricity', 'Electricity'], ['history', 'History']]
-          .map(([k, l]) => <button key={k} className="chip" onClick={() => jump(k)}>{l}</button>)}
+        {chips.map(([k, l]) => <button key={k} className="chip" onClick={() => jump(k)}>{l}</button>)}
       </div>
 
-      <JuteBagsSection />
+      {/* DISPLAY ORDER:
+          On Wednesday: Packaging and Other things come first!
+          Then Chemicals, Stain removers, Electricity, Cleanliness, Jute bag.
+      */}
 
-      {STOCK_SECTIONS.slice(0, 2).map((s) => (
+      {/* 1. On Wednesday: Packaging and Other things at the very top */}
+      {wednesday && STOCK_SECTIONS.filter((s) => s.key === 'packaging' || s.key === 'other').map((s) => (
         <StockSection key={s.key} section={s} rows={log[s.key]} openings={openings[s.key]} date={date}
+          inputRemainingMode={false}
           onChange={(item, patch) => edit((l) => { Object.assign(l[s.key][item], patch); return l; })} />
       ))}
 
-      {/* water */}
-      <section className="panel inv-section" id="inv-water">
-        <div className="panel-title"><Droplets size={16} /> Water log</div>
-        <div className="form-row three-col" style={{ marginBottom: 0 }}>
-          <div>
-            <label className="form-label">Water filled (L)</label>
-            <NumInput value={log.water.filled} onChange={(v) => edit((l) => { l.water.filled = v; return l; })} />
-          </div>
-          <div>
-            <label className="form-label">Water used (L)</label>
-            <NumInput value={log.water.used} onChange={(v) => edit((l) => { l.water.used = v; return l; })} />
-          </div>
-          <div>
-            <label className="form-label">Remaining (L)</label>
-            <NumInput value={isBlank(log.water.remaining) ? waterRemaining : log.water.remaining}
-              className="form-input inv-num inv-auto"
-              onChange={(v) => edit((l) => { l.water.remaining = v; return l; })} />
-          </div>
-        </div>
-      </section>
-
-      {STOCK_SECTIONS.slice(2).map((s) => (
+      {/* 2. Chemicals & Stain removers (Manager enters remaining, used is auto-calculated) */}
+      {STOCK_SECTIONS.filter((s) => s.key === 'chemicals' || s.key === 'stainRemovers').map((s) => (
         <StockSection key={s.key} section={s} rows={log[s.key]} openings={openings[s.key]} date={date}
+          inputRemainingMode={true}
           onChange={(item, patch) => edit((l) => { Object.assign(l[s.key][item], patch); return l; })} />
       ))}
 
-      {/* cleanliness */}
-      <section className="panel inv-section" id="inv-cleanliness">
-        <div className="inv-section-head">
-          <div className="panel-title" style={{ marginBottom: 0 }}>Cleanliness log</div>
-          <button className="chip" onClick={() => edit((l) => { CLEANLINESS_AREAS.forEach((a) => { l.cleanliness[a.key] = true; }); return l; })}>
-            Mark all cleaned
-          </button>
-        </div>
-        <div className="inv-check-grid">
-          {CLEANLINESS_AREAS.map((a) => (
-            <div key={a.key} className="check-tile">
-              <span>{a.label}</span>
-              <Toggle value={log.cleanliness[a.key]} yes="Cleaned" no="Not cleaned"
-                onChange={(v) => edit((l) => { l.cleanliness[a.key] = v; return l; })} />
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* vehicles */}
-      <section className="panel inv-section" id="inv-vehicles">
-        <div className="panel-title">Vehicle log</div>
-        <div className="inv-check-grid">
-          {VEHICLES.map((v) => (
-            <div key={v.key} className="check-tile">
-              <span>{v.label} <em className="inv-sub">charged?</em></span>
-              <Toggle value={log.vehicles[v.key]} yes="Yes" no="No"
-                onChange={(val) => edit((l) => { l.vehicles[v.key] = val; return l; })} />
-            </div>
-          ))}
-        </div>
-        <div className="form-row" style={{ marginTop: 14, marginBottom: 0 }}>
-          <label className="form-label">Issues if any</label>
-          <textarea className="form-input" rows={2} placeholder="e.g. Scooty 2 brake loose"
-            value={log.vehicleIssues} onChange={(e) => { const v = e.target.value; edit((l) => { l.vehicleIssues = v; return l; }); }} />
-        </div>
-      </section>
-
-      {/* electricity */}
+      {/* 3. Electricity log */}
       <section className="panel inv-section" id="inv-electricity">
         <div className="panel-title"><Zap size={16} /> Electricity log</div>
         <div className="form-row three-col" style={{ marginBottom: 0 }}>
@@ -435,6 +466,30 @@ export default function InventoryTab() {
           </div>
         </div>
       </section>
+
+      {/* 4. Cleanliness log */}
+      <section className="panel inv-section" id="inv-cleanliness">
+        <div className="inv-section-head">
+          <div className="panel-title" style={{ marginBottom: 0 }}>Cleanliness log</div>
+          <button className="chip" onClick={() => edit((l) => { CLEANLINESS_AREAS.forEach((a) => { l.cleanliness[a.key] = true; }); return l; })}>
+            Mark all cleaned
+          </button>
+        </div>
+        <div className="inv-check-grid">
+          {CLEANLINESS_AREAS.map((a) => (
+            <div key={a.key} className="check-tile">
+              <span>{a.label}</span>
+              <Toggle value={log.cleanliness[a.key]} yes="Cleaned" no="Not cleaned"
+                onChange={(v) => edit((l) => { l.cleanliness[a.key] = v; return l; })} />
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* 5. Jute bag */}
+      <div id="inv-jutebags">
+        <JuteBagsSection />
+      </div>
 
       <section className="panel inv-section">
         <label className="form-label">Notes for the day</label>
