@@ -10,22 +10,48 @@ import { STOCK_SECTIONS, CLEANLINESS_AREAS } from '../../config/inventoryItems';
 
 const todayStr = () => {
   const d = new Date();
-  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 };
-const shiftDate = (date, days) => {
-  const d = new Date(date + 'T00:00:00');
-  d.setDate(d.getDate() + days);
-  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+const shiftDate = (dateStr, days) => {
+  const [y, m, d] = String(dateStr).slice(0, 10).split('-').map(Number);
+  const dt = new Date(y, m - 1, d + days, 12, 0, 0);
+  const ny = dt.getFullYear();
+  const nm = String(dt.getMonth() + 1).padStart(2, '0');
+  const nd = String(dt.getDate()).padStart(2, '0');
+  return `${ny}-${nm}-${nd}`;
 };
 const isWednesday = (dStr) => {
-  const d = new Date(dStr + 'T00:00:00+05:30');
-  return d.getDay() === 3;
+  if (!dStr) return false;
+  const [y, m, d] = String(dStr).slice(0, 10).split('-').map(Number);
+  if (!y || !m || !d) return false;
+  // Day 3 is Wednesday (0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat) in all timezones
+  return new Date(y, m - 1, d, 12, 0, 0).getDay() === 3;
+};
+const getLastWednesday = (dStr) => {
+  const [y, m, d] = String(dStr || todayStr()).slice(0, 10).split('-').map(Number);
+  const cur = new Date(y, m - 1, d, 12, 0, 0);
+  const day = cur.getDay();
+  const diff = (day - 3 + 7) % 7;
+  const target = new Date(cur.getTime() - (diff === 0 ? 0 : diff) * 86400000);
+  const ty = target.getFullYear();
+  const tm = String(target.getMonth() + 1).padStart(2, '0');
+  const td = String(target.getDate()).padStart(2, '0');
+  return `${ty}-${tm}-${td}`;
 };
 const isBlank = (v) => v === '' || v === null || v === undefined;
 const num = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
 const round = (n) => Math.round(n * 100) / 100;
-const fmtDay = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
-const fmtRowDate = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+const fmtDay = (dStr) => {
+  const [y, m, d] = String(dStr).slice(0, 10).split('-').map(Number);
+  return new Date(y, m - 1, d, 12, 0, 0).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
+};
+const fmtRowDate = (dStr) => {
+  const [y, m, d] = String(dStr).slice(0, 10).split('-').map(Number);
+  return new Date(y, m - 1, d, 12, 0, 0).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+};
 
 const emptyLog = () => {
   const log = {
@@ -261,6 +287,7 @@ export default function InventoryTab() {
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState(null);
+  const [showWeeklyOverride, setShowWeeklyOverride] = useState(false);
 
   useEffect(() => subscribeInventoryLogs(
     (list) => { setLogs(list); setLoading(false); },
@@ -306,17 +333,18 @@ export default function InventoryTab() {
   };
 
   const wednesday = isWednesday(date);
+  const showWeekly = wednesday || showWeeklyOverride;
 
   // Visible stock sections based on Wednesday rule
   const visibleStockSections = useMemo(() => {
-    if (wednesday) {
+    if (showWeekly) {
       return [
         ...STOCK_SECTIONS.filter((s) => s.key === 'packaging' || s.key === 'other'),
         ...STOCK_SECTIONS.filter((s) => s.key === 'chemicals' || s.key === 'stainRemovers'),
       ];
     }
     return STOCK_SECTIONS.filter((s) => s.key === 'chemicals' || s.key === 'stainRemovers');
-  }, [wednesday]);
+  }, [showWeekly]);
 
   /* summary numbers */
   const lowItems = [];
@@ -375,10 +403,11 @@ export default function InventoryTab() {
   }
 
   const isToday = date === todayStr();
+  const lastWed = getLastWednesday(date);
 
   // Jump chips matching the required order
   const chips = [
-    ...(wednesday ? [['packaging', 'Packaging'], ['other', 'Other things']] : []),
+    ...(showWeekly ? [['packaging', 'Packaging'], ['other', 'Other things']] : []),
     ['chemicals', 'Chemicals'],
     ['stainRemovers', 'Stain removers'],
     ['electricity', 'Electricity'],
@@ -391,12 +420,23 @@ export default function InventoryTab() {
     <div className="inv-page">
       {/* date bar */}
       <div className="inv-datebar">
-        <div className="inv-date-nav">
+        <div className="inv-date-nav" style={{ flexWrap: 'wrap', gap: 6 }}>
           <button className="icon-btn" onClick={() => changeDate(shiftDate(date, -1))} title="Previous day"><ChevronLeft size={18} /></button>
           <input className="form-input inv-date" type="date" value={date} max={todayStr()} onChange={(e) => changeDate(e.target.value)} />
           <button className="icon-btn" onClick={() => changeDate(shiftDate(date, 1))} disabled={isToday} title="Next day"><ChevronRight size={18} /></button>
           {!isToday && <button className="chip" onClick={() => changeDate(todayStr())}>Today</button>}
-          {wednesday && <span className="badge badge-blue">Wednesday (Weekly Packaging Log)</span>}
+          {wednesday ? (
+            <span className="badge badge-blue">Wednesday (Weekly Packaging Active)</span>
+          ) : (
+            <>
+              <button type="button" className="chip" onClick={() => changeDate(lastWed)} title="Jump to previous Wednesday">
+                Go to Wednesday ({fmtRowDate(lastWed)})
+              </button>
+              <button type="button" className="chip" onClick={() => setShowWeeklyOverride(!showWeeklyOverride)}>
+                {showWeeklyOverride ? 'Hide weekly packaging' : 'Show weekly packaging'}
+              </button>
+            </>
+          )}
         </div>
         <div className="inv-save-wrap">
           {dirty
@@ -428,12 +468,25 @@ export default function InventoryTab() {
       </div>
 
       {/* DISPLAY ORDER:
-          On Wednesday: Packaging and Other things come first!
-          Then Chemicals, Stain removers, Electricity, Cleanliness, Jute bag.
+          On Wednesday (or when viewing weekly items):
+          1. Packaging
+          2. Other things
+          3. Chemicals
+          4. Stain removers
+          5. Electricity
+          6. Cleanliness log
+          7. Jute bag
+
+          On other days:
+          1. Chemicals
+          2. Stain removers
+          3. Electricity
+          4. Cleanliness log
+          5. Jute bag
       */}
 
-      {/* 1. On Wednesday: Packaging and Other things at the very top */}
-      {wednesday && STOCK_SECTIONS.filter((s) => s.key === 'packaging' || s.key === 'other').map((s) => (
+      {/* 1. On Wednesday (or toggle): Packaging and Other things at the very top */}
+      {showWeekly && STOCK_SECTIONS.filter((s) => s.key === 'packaging' || s.key === 'other').map((s) => (
         <StockSection key={s.key} section={s} rows={log[s.key]} openings={openings[s.key]} date={date}
           inputRemainingMode={false}
           onChange={(item, patch) => edit((l) => { Object.assign(l[s.key][item], patch); return l; })} />
