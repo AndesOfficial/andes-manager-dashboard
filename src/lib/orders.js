@@ -74,36 +74,88 @@ const MONTHS = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7,
 /** 'YYYY-MM-DD' of a Date in India time. */
 export const istDay = (d) => new Date(d.getTime() + 330 * 60000).toISOString().slice(0, 10);
 
-const toDate = (v) => (v && typeof v.toDate === 'function' ? v.toDate()
-  : v instanceof Date ? v
-    : typeof v === 'number' || /^\d{12,}$/.test(String(v ?? '')) ? new Date(Number(v))
-      : null);
+const toDate = (v) => {
+  if (!v) return null;
+  if (typeof v.toDate === 'function') return v.toDate();
+  if (v instanceof Date) return isNaN(v.getTime()) ? null : v;
+  if (typeof v === 'number' || /^\d{10,}$/.test(String(v).trim())) {
+    const n = Number(v);
+    return new Date(n < 10000000000 ? n * 1000 : n);
+  }
+  if (typeof v === 'string') {
+    const trimmed = v.trim();
+    if (!trimmed) return null;
+    const parsed = Date.parse(trimmed);
+    if (!isNaN(parsed)) return new Date(parsed);
+  }
+  return null;
+};
 
 /**
  * Pickup day of a rider order. The apps store it in several shapes:
- * scheduledPickupDate (Timestamp), pickupDate ('YYYY-MM-DD'), pickupTime
- * (Timestamp, ISO string, or text like "Tue, 14 Oct · 6:00 PM - 10:00 PM"),
- * and older orders only a slot ("6:00 PM - 10:00 PM") — those use the order date.
+ * scheduledPickupDate (Timestamp/Date/String), pickupDate ('YYYY-MM-DD' or 'DD/MM/YYYY'),
+ * pickupTime (Timestamp, ISO string, or text like "Tue, 14 Oct · 6:00 PM - 10:00 PM"),
+ * date / orderDate, or createdAt / orderTimestamp / updatedAt fallback.
  */
 export function pickupDay(o) {
-  const created = toDate(o.createdAt) || toDate(o.orderTimestamp);
+  if (!o) return '';
+  // 1. scheduledPickupDate (e.g. advance bookings)
   const sched = toDate(o.scheduledPickupDate);
   if (sched) return istDay(sched);
-  if (/^\d{4}-\d{2}-\d{2}/.test(String(o.pickupDate || ''))) return String(o.pickupDate).slice(0, 10);
+  if (typeof o.scheduledPickupDate === 'string') {
+    const trimmed = o.scheduledPickupDate.trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) return trimmed.slice(0, 10);
+    const dmy = trimmed.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+    if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+  }
+
+  // 2. pickupDate
+  if (o.pickupDate) {
+    const pd = String(o.pickupDate).trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(pd)) return pd.slice(0, 10);
+    const dmy = pd.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+    if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+    const d = toDate(o.pickupDate);
+    if (d) return istDay(d);
+  }
+
+  // 3. pickupTime
   const pt = o.pickupTime;
   const ptDate = toDate(pt);
   if (ptDate) return istDay(ptDate);
   if (typeof pt === 'string') {
-    if (/^\d{4}-\d{2}-\d{2}/.test(pt)) return pt.slice(0, 10);
-    const m = pt.match(/\b(\d{1,2})\s+([A-Za-z]{3})/);
-    if (m && MONTHS[m[2].toLowerCase()] !== undefined && created) {
-      let year = created.getFullYear();
+    const trimmed = pt.trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) return trimmed.slice(0, 10);
+    const dmy = trimmed.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+    if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+    const m = trimmed.match(/\b(\d{1,2})\s+([A-Za-z]{3})/);
+    const created = toDate(o.createdAt) || toDate(o.orderTimestamp) || toDate(o.updatedAt);
+    if (m && MONTHS[m[2].toLowerCase()] !== undefined) {
+      let year = created ? created.getFullYear() : new Date().getFullYear();
       const month = MONTHS[m[2].toLowerCase()];
-      if (month < created.getMonth() - 6) year += 1; // Dec order, Jan pickup
+      if (created && month < created.getMonth() - 6) year += 1;
       return `${year}-${String(month + 1).padStart(2, '0')}-${String(m[1]).padStart(2, '0')}`;
     }
   }
-  return created ? istDay(created) : '';
+
+  // 4. date or orderDate
+  if (o.date || o.orderDate) {
+    const rawD = o.date || o.orderDate;
+    if (typeof rawD === 'string') {
+      const trimmed = rawD.trim();
+      if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) return trimmed.slice(0, 10);
+      const dmy = trimmed.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+      if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+    }
+    const d = toDate(rawD);
+    if (d) return istDay(d);
+  }
+
+  // 5. fallback: createdAt, orderTimestamp, or updatedAt
+  const created = toDate(o.createdAt) || toDate(o.orderTimestamp) || toDate(o.updatedAt);
+  if (created) return istDay(created);
+
+  return '';
 }
 
 /** Rider-recorded order weight, newest field first. */
@@ -227,7 +279,7 @@ export function buildB2cRow(order, verification, categories) {
   const rider = riderLines(order, categories);
   const v = verification || {};
   const sig = linesSig(rider);
-  let status = v.status || 'pending';
+  let status = v.status || (isCancelledOrder(order) ? 'cancelled' : 'pending');
   if (status === 'verified' && v.riderSig && v.riderSig !== sig) status = 'changed';
   const lines = Array.isArray(v.lines) && status !== 'changed' ? v.lines : rider;
   const leadSource = getOrderLeadSource(order);

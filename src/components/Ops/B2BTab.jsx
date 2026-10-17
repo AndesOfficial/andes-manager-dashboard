@@ -1,13 +1,19 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Plus, Trash2, Loader2, Info } from 'lucide-react';
-import { addB2bEntry, updateB2bEntry, fetchStoreB2bReference } from '../../firebase';
+import { Plus, Trash2, Loader2, Info, Camera, X } from 'lucide-react';
+import { addB2bEntry, updateB2bEntry, fetchStoreB2bReference, uploadB2bPhoto } from '../../firebase';
 import { num, round1 } from '../../lib/orders';
 import {
   fmtKg, fmtDay, todayStr, EmptyState, Sheet, StatusBadge, RowActions, ReasonSheet, HistoryList,
   STATUS_FILTERS, matchesFilter,
 } from './shared';
 
-const EDIT_FIELDS = [['kg', 'KG'], ['clothes', 'Clothes'], ['note', 'Note']];
+const EDIT_FIELDS = [
+  ['kg', 'KG'],
+  ['clothes', 'Clothes'],
+  ['students', 'Students'],
+  ['note', 'Note'],
+  ['photoUrl', 'Photo'],
+];
 
 export const ONE8_CATALOGUE = [
   'Wiping Cloth',
@@ -58,8 +64,11 @@ export function getClientCatalogue(clientName) {
 function EntrySheet({ entry, defaultDate, clients, onClose }) {
   const isEdit = !!entry;
   const [form, setForm] = useState(() => entry
-    ? { ...entry, items: entry.items || [] }
-    : { client: clients[0] || '', date: defaultDate, batchNo: '1', kg: '', clothes: '', items: [], note: '' });
+    ? { ...entry, items: entry.items || [], students: entry.students ?? '', photoUrl: entry.photoUrl || '' }
+    : { client: clients[0] || '', date: defaultDate, batchNo: '1', kg: '', clothes: '', students: '', photoUrl: '', items: [], note: '' });
+  const [photoFile, setPhotoFile] = useState(null);
+  const [photoPreview, setPhotoPreview] = useState(() => entry?.photoUrl || '');
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -70,6 +79,24 @@ function EntrySheet({ entry, defaultDate, clients, onClose }) {
 
   // Item breakdown, when filled, decides the clothes count.
   const itemTotal = form.items.reduce((s, it) => s + num(it.qty), 0);
+
+  const handlePhotoSelect = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setError('Please choose a valid image file (PNG, JPG, WebP).');
+      return;
+    }
+    setPhotoFile(file);
+    setPhotoPreview(URL.createObjectURL(file));
+    setError('');
+  };
+
+  const removePhoto = () => {
+    setPhotoFile(null);
+    setPhotoPreview('');
+    set('photoUrl', '');
+  };
 
   const addFromCatalogue = (itemName) => {
     const existingIndex = form.items.findIndex((it) => it.name.toLowerCase() === itemName.toLowerCase());
@@ -94,15 +121,36 @@ function EntrySheet({ entry, defaultDate, clients, onClose }) {
   const submit = async (e) => {
     e.preventDefault();
     const items = form.items.filter((it) => it.name.trim() && num(it.qty) > 0).map((it) => ({ name: it.name.trim(), qty: num(it.qty) }));
+    if (!form.client.trim()) { setError('Choose the client.'); return; }
+    if (round1(form.kg) <= 0 && (items.length ? itemTotal : num(form.clothes)) <= 0) {
+      setError('Enter the KG or the clothes count.'); return;
+    }
+
+    setSaving(true);
+    let photoUrl = form.photoUrl || '';
+    if (photoFile) {
+      setUploadingPhoto(true);
+      try {
+        const res = await uploadB2bPhoto(photoFile, `b2b_entries/${form.date}`);
+        photoUrl = res.url;
+      } catch (uploadErr) {
+        setError(`Photo upload failed: ${uploadErr.message}`);
+        setSaving(false);
+        setUploadingPhoto(false);
+        return;
+      }
+      setUploadingPhoto(false);
+    }
+
     const clean = {
       kg: round1(form.kg),
       clothes: items.length ? itemTotal : num(form.clothes),
+      students: num(form.students) || 0,
+      photoUrl: photoUrl || '',
       items,
       note: form.note.trim(),
     };
-    if (!form.client.trim()) { setError('Choose the client.'); return; }
-    if (clean.kg <= 0 && clean.clothes <= 0) { setError('Enter the KG or the clothes count.'); return; }
-    setSaving(true);
+
     try {
       if (isEdit) {
         const changes = EDIT_FIELDS
@@ -155,6 +203,37 @@ function EntrySheet({ entry, defaultDate, clients, onClose }) {
               value={form.items.length ? itemTotal : form.clothes} disabled={form.items.length > 0}
               onChange={(e) => set('clothes', e.target.value)} />
           </div>
+        </div>
+
+        <div className="form-row">
+          <label className="form-label">Number of students <span className="ops-muted">(Hostels / Colleges)</span></label>
+          <input className="form-input" type="number" min="0" inputMode="numeric"
+            value={form.students || ''} onChange={(e) => set('students', e.target.value)} placeholder="e.g. 120 (optional)" />
+        </div>
+
+        <div className="form-row">
+          <label className="form-label">Challan / Clothes Photo</label>
+          {photoPreview ? (
+            <div className="b2b-photo-preview-wrap">
+              <img src={photoPreview} alt="Challan preview" className="b2b-photo-thumb" />
+              <div className="b2b-photo-actions">
+                <label className="btn-ghost" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <Camera size={14} /> Change photo
+                  <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handlePhotoSelect} />
+                </label>
+                <button type="button" className="btn-ghost" style={{ color: 'var(--red)' }} onClick={removePhoto}>
+                  <Trash2 size={14} /> Remove photo
+                </button>
+              </div>
+            </div>
+          ) : (
+            <label className="b2b-photo-dropzone">
+              <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handlePhotoSelect} />
+              <Camera size={22} className="ops-muted" />
+              <span className="b2b-photo-dropzone-title">Upload or take photo</span>
+              <span className="ops-muted" style={{ fontSize: 12 }}>Attach challan receipt or clothes photo (optional)</span>
+            </label>
+          )}
         </div>
 
         <div className="form-row">
@@ -237,14 +316,32 @@ function EntrySheet({ entry, defaultDate, clients, onClose }) {
         )}
         {error && <div className="form-error">{error}</div>}
         <button className="btn-primary" type="submit" disabled={saving} style={{ width: '100%' }}>
-          {saving ? <Loader2 size={16} className="spin" /> : null} {isEdit ? 'Save changes' : 'Add entry'}
+          {saving ? <Loader2 size={16} className="spin" /> : null}{' '}
+          {uploadingPhoto ? 'Uploading photo...' : isEdit ? 'Save changes' : 'Add entry'}
         </button>
       </form>
     </Sheet>
   );
 }
 
-function EntryRow({ entry, onEdit, onCancel }) {
+function PhotoModal({ url, title, onClose }) {
+  if (!url) return null;
+  return (
+    <div className="modal-backdrop" onClick={onClose} style={{ zIndex: 100 }}>
+      <div className="modal-sheet photo-modal-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <div className="modal-title">{title || 'Challan Photo'}</div>
+          <button type="button" className="icon-btn" onClick={onClose}><X size={18} /></button>
+        </div>
+        <div className="modal-body" style={{ textAlign: 'center', padding: 16 }}>
+          <img src={url} alt={title || 'Challan'} className="b2b-lightbox-img" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EntryRow({ entry, onEdit, onCancel, onZoomPhoto }) {
   const [busy, setBusy] = useState(false);
   const run = async (action) => {
     setBusy(true);
@@ -256,14 +353,31 @@ function EntryRow({ entry, onEdit, onCancel }) {
       <div className="card-top">
         <div>
           <div className="card-name">{entry.client}</div>
-          <div className="ops-muted">{fmtDay(entry.date)} · Batch {entry.batchNo}{entry.note && ` · ${entry.note}`}</div>
+          <div className="ops-muted">
+            {fmtDay(entry.date)} · Batch {entry.batchNo}
+            {entry.students > 0 && ` · ${entry.students} students`}
+            {entry.note && ` · ${entry.note}`}
+          </div>
         </div>
         <div className="ops-row-kg">{fmtKg(entry.kg)}<div className="ops-muted">{entry.clothes} clothes</div></div>
       </div>
       {entry.items?.length > 0 && (
         <div className="svc-items">{entry.items.map((it) => `${it.name} × ${it.qty}`).join(', ')}</div>
       )}
-      <div className="card-badges"><StatusBadge status={entry.status} locked={!!entry.adminLockedAt} /></div>
+      <div className="card-badges">
+        <StatusBadge status={entry.status} locked={!!entry.adminLockedAt} />
+        {entry.students > 0 && <span className="badge badge-purple">{entry.students} students</span>}
+        {entry.photoUrl && (
+          <button
+            type="button"
+            className="b2b-photo-pill"
+            onClick={() => onZoomPhoto(entry.photoUrl, `${entry.client} (Batch ${entry.batchNo})`)}
+            title="Click to view challan photo"
+          >
+            <Camera size={12} /> Challan Photo
+          </button>
+        )}
+      </div>
       <RowActions status={entry.status} locked={!!entry.adminLockedAt} busy={busy} isB2b={true}
         onVerify={() => run('verify')} onRestore={() => run('restore')}
         onEdit={() => onEdit(entry)} onCancel={() => onCancel(entry)} />
@@ -309,6 +423,7 @@ export default function B2BTab({ range, entries, clients, adding, onAddClose }) 
   const [filter, setFilter] = useState('all');
   const [editing, setEditing] = useState(null);
   const [cancelling, setCancelling] = useState(null);
+  const [zoomPhoto, setZoomPhoto] = useState(null);
 
   const clientList = useMemo(() => Array.from(new Set([
     ...(clients || []),
@@ -333,7 +448,15 @@ export default function B2BTab({ range, entries, clients, adding, onAddClose }) 
         <EmptyState title="No matches" sub="Try another filter." />
       ) : (
         <div className="ops-cards">
-          {list.map((e) => <EntryRow key={e.id} entry={e} onEdit={setEditing} onCancel={setCancelling} />)}
+          {list.map((e) => (
+            <EntryRow
+              key={e.id}
+              entry={e}
+              onEdit={setEditing}
+              onCancel={setCancelling}
+              onZoomPhoto={(url, title) => setZoomPhoto({ url, title })}
+            />
+          ))}
         </div>
       )}
 
@@ -347,6 +470,13 @@ export default function B2BTab({ range, entries, clients, adding, onAddClose }) 
         <ReasonSheet title={`Cancel ${cancelling.client} batch ${cancelling.batchNo}`} confirmLabel="Cancel entry"
           onClose={() => setCancelling(null)}
           onConfirm={(reason) => updateB2bEntry(cancelling.id, 'cancel', { reason })} />
+      )}
+      {zoomPhoto && (
+        <PhotoModal
+          url={zoomPhoto.url}
+          title={zoomPhoto.title}
+          onClose={() => setZoomPhoto(null)}
+        />
       )}
     </div>
   );

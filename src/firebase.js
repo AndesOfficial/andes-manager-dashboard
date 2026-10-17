@@ -24,6 +24,12 @@ import {
   setPersistence,
   browserSessionPersistence,
 } from 'firebase/auth';
+import {
+  getStorage,
+  ref,
+  uploadBytes,
+  getDownloadURL,
+} from 'firebase/storage';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -38,6 +44,18 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 export const auth = getAuth(app);
+export const storage = getStorage(app);
+
+/** Upload a B2B order photo (challan/clothes) to Firebase Storage */
+export async function uploadB2bPhoto(file, folder = 'manager_b2b_photos') {
+  if (!file) throw new Error('No file provided for upload.');
+  const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+  const path = `${folder}/${Date.now()}_${safeName}`;
+  const fileRef = ref(storage, path);
+  const snap = await uploadBytes(fileRef, file, { contentType: file.type || 'image/jpeg' });
+  const url = await getDownloadURL(snap.ref);
+  return { url, path };
+}
 
 // Enforce tab-isolated sessions
 setPersistence(auth, browserSessionPersistence).catch((err) => {
@@ -116,14 +134,14 @@ const historyEntry = (action, reason = '', changes = []) => ({
 /* ---- B2C: rider orders (`cartdetails`) ---- */
 
 // Pickup day lives in different fields per app version (see pickupDay()), so
-// load by createdAt — every order has it — from a week before the range, and
-// let the caller keep orders whose pickup day falls inside the range.
-export const PICKUP_LOOKBACK_DAYS = 7;
+// load by createdAt — every order has it — looking back up to 45 days before
+// the range to capture advance bookings, with a 2-day buffer ahead of `to`.
+export const PICKUP_LOOKBACK_DAYS = 45;
 
 export function subscribeB2cOrders(from, to, callback, onError) {
   const q = query(collection(db, 'cartdetails'),
     where('createdAt', '>=', Timestamp.fromDate(dayAfter(from, -PICKUP_LOOKBACK_DAYS))),
-    where('createdAt', '<', Timestamp.fromDate(dayAfter(to))));
+    where('createdAt', '<', Timestamp.fromDate(dayAfter(to, 2))));
   return onSnapshot(q, (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }))), onError);
 }
 

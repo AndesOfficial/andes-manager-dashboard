@@ -189,7 +189,19 @@ export default function B2CTab({ rows, focusId }) {
       {rows.length === 0 ? (
         <EmptyState title="No rider orders for these dates" sub="Orders show here by their pickup date." />
       ) : list.length === 0 ? (
-        <EmptyState title={filter === 'todo' ? 'All orders verified 🎉' : 'No matches'} sub="Try another filter or search." />
+        <div style={{ textAlign: 'center' }}>
+          <EmptyState title={filter === 'todo' ? 'All orders verified 🎉' : 'No matches'} sub="Try another filter or search." />
+          {filter === 'todo' && counts.all > 0 && (
+            <button
+              type="button"
+              className="btn-ghost"
+              style={{ margin: '12px auto 0' }}
+              onClick={() => setFilter('all')}
+            >
+              View all {counts.all} orders
+            </button>
+          )}
+        </div>
       ) : (
         <div className="ops-cards">
           {list.map((r) => <OrderRow key={r.id} row={r} highlight={r.id === focusId} onEdit={setEditing} onCancel={setCancelling} />)}

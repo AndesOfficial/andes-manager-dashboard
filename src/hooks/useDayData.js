@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   subscribeB2cOrders, subscribeVerifications, subscribeB2bEntries, fetchServiceCategories,
 } from '../firebase';
-import { buildB2cRow, isCancelledOrder, b2cTotals, b2bTotals } from '../lib/orders';
+import { buildB2cRow, b2cTotals, b2bTotals } from '../lib/orders';
 
 /** Live B2C rows + B2B entries whose pickup/entry day is in [from, to], with totals. */
 export default function useRangeData({ from, to }, enabled) {
@@ -27,7 +27,7 @@ export default function useRangeData({ from, to }, enabled) {
         : 'Could not load data. Check your connection and refresh.');
     };
     const unsubs = [
-      subscribeB2cOrders(from, to, (list) => setOrders(list.filter((o) => !isCancelledOrder(o))), onError),
+      subscribeB2cOrders(from, to, setOrders, onError),
       subscribeVerifications(from, to, setVerifications, onError),
       subscribeB2bEntries(from, to, setB2b, onError),
     ];
