@@ -237,7 +237,7 @@ export default function App() {
           ) : tab === 'b2b' ? (
             <B2BTab range={range} entries={data.b2bEntries} clients={hostels} adding={adding} onAddClose={() => setAdding(false)} />
           ) : tab === 'b2c' ? (
-            <B2CTab rows={data.b2cRows} focusId={focusId} />
+            <B2CTab rows={data.b2cRows} focusId={focusId} range={range} />
           ) : tab === 'issues' ? (
             <IssuesTab clients={hostels} />
           ) : tab === 'inventory' ? (

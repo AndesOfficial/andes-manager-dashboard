@@ -48,11 +48,28 @@ export default function useRangeData({ from, to }, enabled) {
         return false;
       })
       .sort((a, b) => {
-        if (a.isDelayed !== b.isDelayed) return a.isDelayed ? -1 : 1;
-        if (a.isDelayed && b.isDelayed && a.delayedDays !== b.delayedDays) {
-          return b.delayedDays - a.delayedDays;
-        }
-        return b.pickupDay.localeCompare(a.pickupDay) || a.customer.localeCompare(b.customer);
+        // Arrange orders strictly from latest to oldest
+        // 1. Primary: pickupDay descending (e.g. 2026-10-19 before 2026-10-18 or 2025-10-22)
+        const dateCmp = (b.pickupDay || '').localeCompare(a.pickupDay || '');
+        if (dateCmp !== 0) return dateCmp;
+
+        // 2. Secondary: order creation timestamp descending
+        const getTime = (o) => {
+          const t = o?.createdAt || o?.orderTimestamp || o?.updatedAt;
+          if (!t) return 0;
+          if (typeof t.toMillis === 'function') return t.toMillis();
+          if (typeof t.toDate === 'function') return t.toDate().getTime();
+          if (t instanceof Date) return t.getTime();
+          if (typeof t === 'number') return t;
+          const parsed = Date.parse(t);
+          return isNaN(parsed) ? 0 : parsed;
+        };
+        const bTime = getTime(b.order);
+        const aTime = getTime(a.order);
+        if (bTime !== aTime) return bTime - aTime;
+
+        // 3. Fallback: customer name
+        return a.customer.localeCompare(b.customer);
       });
   }, [orders, verifications, categories, from, to]);
 

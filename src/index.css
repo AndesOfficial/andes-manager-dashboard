@@ -1272,3 +1272,158 @@ textarea.form-input { resize: vertical; min-height: 80px; }
   margin-top: 2px;
 }
 
+/* ---- B2C Order Cards Redesign ---- */
+.b2c-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px;
+  position: relative;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.04);
+}
+.b2c-card:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
+}
+.b2c-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.b2c-id-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 700;
+  color: #334155;
+  background: #f1f5f9;
+  padding: 3px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid #e2e8f0;
+  transition: all 0.15s ease;
+}
+.b2c-id-pill:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+.b2c-customer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.b2c-cust-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.b2c-cust-phone {
+  font-size: 12px;
+  font-weight: 600;
+  color: #2563eb;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.b2c-cust-phone:hover {
+  text-decoration: underline;
+}
+.b2c-schedule-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+.b2c-schedule-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: #f8fafc;
+  padding: 5px 9px;
+  border-radius: 6px;
+  border: 1px solid #f1f5f9;
+  font-weight: 500;
+  color: #475569;
+}
+.b2c-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+.b2c-metric-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+.b2c-metric-cell:not(:last-child) {
+  border-right: 1px solid #e2e8f0;
+}
+.b2c-metric-val {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--ink);
+}
+.b2c-metric-lbl {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+  color: var(--ink-soft);
+  margin-top: 1px;
+}
+.b2c-price-highlight {
+  color: #059669;
+}
+.b2c-order-status-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: #e0e7ff;
+  color: #3730a3;
+  text-transform: capitalize;
+}
+.b2c-price-calc-box {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 10px;
+  padding: 12px;
+  margin: 14px 0;
+}
+.b2c-price-calc-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #166534;
+  margin-bottom: 4px;
+}
+.b2c-price-calc-total {
+  display: flex;
+  justify-content: space-between;
+  font-size: 15px;
+  font-weight: 800;
+  color: #14532d;
+  border-top: 1px dashed #86efac;
+  padding-top: 6px;
+  margin-top: 6px;
+}
+

@@ -1,7 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Search, Loader2, CreditCard, AlertTriangle, Pencil, CheckCircle2, X } from 'lucide-react';
-import { saveB2cVerification, updateB2cPayment } from '../../firebase';
-import { SERVICE_GROUPS, diffLines, num, round1, LEAD_SOURCE_TYPES } from '../../lib/orders';
+import {
+  Search, Loader2, CreditCard, AlertTriangle, Pencil, CheckCircle2, X,
+  Copy, Check, Phone, Calendar, Clock, Sparkles
+} from 'lucide-react';
+import { saveB2cVerification, updateB2cPayment, fetchPricesCatalog } from '../../firebase';
+import { SERVICE_GROUPS, diffLines, num, round1, LEAD_SOURCE_TYPES, calculateB2cPrice } from '../../lib/orders';
 import {
   fmtKg, fmtDay, EmptyState, Sheet, StatusBadge, RowActions, ReasonSheet, HistoryList,
   STATUS_FILTERS, matchesFilter,
@@ -118,12 +121,17 @@ function EditPaymentSheet({ row, onClose }) {
   );
 }
 
-function EditSheet({ row, onClose }) {
+function EditSheet({ row, onClose, pricesCatalog = {}, onSaved }) {
   const [lines, setLines] = useState(() => row.lines.map((l) => ({ ...l })));
-  const [reason, setReason] = useState('');
+  const [reason, setReason] = useState('Re-weighed at store counter');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const set = (i, field, value) => setLines((ls) => ls.map((l, j) => (j === i ? { ...l, [field]: value } : l)));
+
+  // Live recalculate price based on edited lines
+  const priceInfo = useMemo(() => {
+    return calculateB2cPrice(row.order, lines, pricesCatalog);
+  }, [row.order, lines, pricesCatalog]);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -133,7 +141,13 @@ function EditSheet({ row, onClose }) {
     if (!reason.trim()) { setError('Write why you are correcting this.'); return; }
     setSaving(true);
     try {
-      await saveB2cVerification(row, 'edit', { lines: clean, reason: reason.trim(), changes });
+      await saveB2cVerification(row, 'edit', {
+        lines: clean,
+        reason: reason.trim(),
+        changes,
+        calculatedTotal: priceInfo.total,
+      });
+      if (onSaved) onSaved(row.id);
       onClose();
     } catch (err) { setError(err.message); setSaving(false); }
   };
@@ -141,67 +155,211 @@ function EditSheet({ row, onClose }) {
   return (
     <Sheet title={`Correct ${row.customer}`} onClose={onClose}>
       <form onSubmit={submit}>
-        <p className="ops-hint">Saving a correction also marks the order verified. The rider's original values are kept in history.</p>
+        <p className="ops-hint">
+          Updating weight will recalculate the order price and save it to both the order bill and verification records.
+        </p>
+
         {lines.map((l, i) => (
           <div className="form-row two-col" key={l.name}>
             <div>
               <label className="form-label">{l.name} <span className="ops-muted">({groupLabel[l.group]})</span></label>
-              {isKgLine(l) && (
+              {isKgLine(l) ? (
                 <input className="form-input" type="number" step="0.1" min="0" inputMode="decimal"
                   value={l.kg} onChange={(e) => set(i, 'kg', e.target.value)} placeholder="KG" />
+              ) : (
+                <span className="ops-muted" style={{ display: 'block', padding: '8px 0' }}>Per-piece service</span>
               )}
             </div>
             <div>
-              <label className="form-label">Clothes</label>
+              <label className="form-label">Clothes Count</label>
               <input className="form-input" type="number" min="0" inputMode="numeric"
                 value={l.qty} onChange={(e) => set(i, 'qty', e.target.value)} />
             </div>
           </div>
         ))}
+
+        {/* Live calculated price box */}
+        <div className="b2c-price-calc-box">
+          <div className="b2c-price-calc-row">
+            <span>Rate Applied:</span>
+            <strong>₹{priceInfo.perKgRate}/kg (Wash)</strong>
+          </div>
+          <div className="b2c-price-calc-row">
+            <span>Items Subtotal:</span>
+            <span>₹{priceInfo.subtotal}</span>
+          </div>
+          {(priceInfo.deliveryCharge > 0 || priceInfo.convenienceFee > 0) && (
+            <div className="b2c-price-calc-row">
+              <span>Delivery & Fees:</span>
+              <span>+₹{priceInfo.deliveryCharge + priceInfo.convenienceFee}</span>
+            </div>
+          )}
+          {priceInfo.discounts > 0 && (
+            <div className="b2c-price-calc-row" style={{ color: '#047857' }}>
+              <span>Discounts Applied:</span>
+              <span>-₹{priceInfo.discounts}</span>
+            </div>
+          )}
+          <div className="b2c-price-calc-total">
+            <span>Calculated New Total:</span>
+            <span style={{ fontSize: 17, color: '#047857' }}>
+              ₹{priceInfo.total} <span style={{ fontSize: 12, fontWeight: 400, color: '#64748b' }}>(was ₹{row.payment.amount})</span>
+            </span>
+          </div>
+        </div>
+
         <div className="form-row">
           <label className="form-label">Reason for correction</label>
           <input className="form-input" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Re-weighed at store: 4.2 kg" />
         </div>
+
         {error && <div className="form-error">{error}</div>}
-        <button className="btn-primary" type="submit" disabled={saving} style={{ width: '100%' }}>
-          {saving ? <Loader2 size={16} className="spin" /> : null} Save & verify
+
+        <button className="btn-primary" type="submit" disabled={saving} style={{ width: '100%', marginTop: 8 }}>
+          {saving ? <Loader2 size={16} className="spin" /> : null} Save Weight & Update Price (₹{priceInfo.total})
         </button>
       </form>
     </Sheet>
   );
 }
 
-function OrderRow({ row, highlight, onEdit, onCancel, onEditPayment }) {
+function OrderRow({ row, highlight, isJustEdited, onEdit, onCancel, onEditPayment }) {
   const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+
   const run = async (action) => {
     setBusy(true);
     try { await saveB2cVerification(row, action, { lines: row.lines }); } catch (err) { alert(err.message); }
     setBusy(false);
   };
+
+  const orderNumber = row.globalOrderNumber ? `#${row.globalOrderNumber}` : `#${row.id.slice(-6).toUpperCase()}`;
+
+  const copyId = (e) => {
+    e.stopPropagation();
+    navigator.clipboard?.writeText(row.id);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   return (
-    <div className={`card ops-row ops-st-${row.status} ${row.isDelayed ? 'ops-row-delayed' : ''} ${highlight ? 'ops-row-hl' : ''}`} id={`b2c-${row.id}`}>
-      <div className="card-top">
-        <div>
-          <div className="card-name" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <span>{row.customer}</span>
-            {row.isDelayed && (
-              <span className="badge badge-delayed" title={`Active order not delivered yet. Scheduled: ${fmtDay(row.dropDay || row.pickupDay)}`}>
-                <AlertTriangle size={12} /> Delayed by {row.delayedDays} {row.delayedDays === 1 ? 'day' : 'days'}
-              </span>
-            )}
-          </div>
-          <div className="ops-muted">
-            #{row.id.slice(-6).toUpperCase()} · Pickup {fmtDay(row.pickupDay)}
-            {row.dropDay && ` · Delivery ${fmtDay(row.dropDay)}`} · {row.orderStatus || '—'}
-          </div>
+    <div className={`card b2c-card ops-row ops-st-${row.status} ${row.isDelayed ? 'ops-row-delayed' : ''} ${highlight ? 'ops-row-hl' : ''}`} id={`b2c-${row.id}`}>
+      
+      {/* 1. Header Zone: Order ID, Status Badge, Just-Edited Flag */}
+      <div className="b2c-card-header">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <button type="button" className="b2c-id-pill" onClick={copyId} title="Click to copy full Order ID">
+            {orderNumber}
+            {copied ? <Check size={12} color="#16a34a" /> : <Copy size={12} style={{ opacity: 0.6 }} />}
+          </button>
+          {row.orderStatus && (
+            <span className="b2c-order-status-badge">
+              {row.orderStatus}
+            </span>
+          )}
+          {isJustEdited && (
+            <span className="badge badge-green" style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+              <Sparkles size={11} /> Saved & Verified
+            </span>
+          )}
         </div>
-        <div className="ops-row-kg">{row.kg > 0 && fmtKg(row.kg)}<div className="ops-muted">{row.clothes} clothes</div></div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          {row.isDelayed && (
+            <span className="badge badge-delayed" title={`Active order not delivered yet. Scheduled: ${fmtDay(row.dropDay || row.pickupDay)}`}>
+              <AlertTriangle size={12} /> Delayed by {row.delayedDays} {row.delayedDays === 1 ? 'day' : 'days'}
+            </span>
+          )}
+          <StatusBadge status={row.status} locked={row.locked} />
+        </div>
       </div>
 
-      {/* Payment details with manager edit option */}
+      {/* 2. Customer & Contact Info */}
+      <div className="b2c-customer-row">
+        <div>
+          <span className="b2c-cust-name">{row.customer}</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {row.phone && (
+            <a href={`tel:${row.phone}`} className="b2c-cust-phone" title="Call customer">
+              <Phone size={12} /> {row.phone}
+            </a>
+          )}
+          {row.leadSource && (
+            <span className={`badge ${
+              row.leadSource === 'whatsapp' ? 'badge-green' :
+              row.leadSource === 'website' ? 'badge-blue' :
+              row.leadSource === 'user_app' ? 'badge-purple' :
+              row.leadSource === 'walk_in' ? 'badge-amber' : 'badge-gray'
+            }`}>
+              {row.leadSource === 'user_app' ? 'User App' :
+               row.leadSource === 'walk_in' ? 'Walk In' :
+               row.leadSource === 'whatsapp' ? 'WhatsApp' :
+               row.leadSource === 'website' ? 'Website' : 'Other'}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* 3. Schedule & Slots */}
+      <div className="b2c-schedule-strip">
+        <span className="b2c-schedule-item">
+          <Calendar size={12} style={{ color: '#2563eb' }} />
+          <span>Pickup: <strong>{fmtDay(row.pickupDay)}</strong></span>
+          {row.pickupSlot && <span className="ops-muted">({row.pickupSlot})</span>}
+        </span>
+        <span className="b2c-schedule-item">
+          <Clock size={12} style={{ color: '#059669' }} />
+          <span>Drop: <strong>{row.dropDay ? fmtDay(row.dropDay) : 'Standard'}</strong></span>
+          {row.dropSlot && <span className="ops-muted">({row.dropSlot})</span>}
+        </span>
+      </div>
+
+      {/* 4. Key Metrics Grid: Total Weight, Total Clothes, Total Amount */}
+      <div className="b2c-metrics-grid">
+        <div className="b2c-metric-cell">
+          <span className="b2c-metric-val">{row.kg > 0 ? fmtKg(row.kg) : '—'}</span>
+          <span className="b2c-metric-lbl">Total Weight</span>
+        </div>
+        <div className="b2c-metric-cell">
+          <span className="b2c-metric-val">{row.clothes} pcs</span>
+          <span className="b2c-metric-lbl">Clothes Count</span>
+        </div>
+        <div className="b2c-metric-cell">
+          <span className="b2c-metric-val b2c-price-highlight">₹{row.payment.amount}</span>
+          <span className="b2c-metric-lbl">Order Amount</span>
+        </div>
+      </div>
+
+      {/* 5. Services Line Items Breakdown */}
+      <table className="ops-lines" style={{ margin: '4px 0' }}>
+        <tbody>
+          {row.lines.map((l) => {
+            const r = row.rider.find((x) => x.name === l.name);
+            const edited = row.corrected && r && (round1(r.kg) !== round1(l.kg) || num(r.qty) !== num(l.qty));
+            return (
+              <tr key={l.name}>
+                <td>
+                  <strong>{l.name}</strong>
+                  <span className="ops-muted"> · {groupLabel[l.group] || l.group}</span>
+                </td>
+                <td className="ops-num">
+                  {isKgLine(l) && <span style={{ fontWeight: 700 }}>{round1(l.kg)} kg · </span>}
+                  <span>{l.qty} pcs</span>
+                  {edited && (
+                    <div className="ops-was">
+                      rider: {isKgLine(r) && `${round1(r.kg)} kg · `}{r.qty} pcs
+                    </div>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+
+      {/* 6. Payment Status and Edit Action */}
       <div className="ops-payment-wrap">
         <div className="ops-payment-info">
-          <span className="ops-payment-amt">₹{row.payment.amount}</span>
           <span className={`badge ${
             row.payment.status === 'paid' ? 'badge-green' :
             row.payment.status === 'failed' ? 'badge-red' : 'badge-amber'
@@ -222,55 +380,35 @@ function OrderRow({ row, highlight, onEdit, onCancel, onEditPayment }) {
         </button>
       </div>
 
-      <table className="ops-lines">
-        <tbody>
-          {row.lines.map((l) => {
-            const r = row.rider.find((x) => x.name === l.name);
-            const edited = row.corrected && r && (round1(r.kg) !== round1(l.kg) || num(r.qty) !== num(l.qty));
-            return (
-              <tr key={l.name}>
-                <td>{l.name}<span className="ops-muted"> · {groupLabel[l.group]}</span></td>
-                <td className="ops-num">
-                  {isKgLine(l) && `${round1(l.kg)} kg · `}{l.qty} pcs
-                  {edited && <div className="ops-was">rider: {isKgLine(r) && `${round1(r.kg)} kg · `}{r.qty} pcs</div>}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      <div className="card-badges">
-        <StatusBadge status={row.status} locked={row.locked} />
-        {row.leadSource && (
-          <span className={`badge ${
-            row.leadSource === 'whatsapp' ? 'badge-green' :
-            row.leadSource === 'website' ? 'badge-blue' :
-            row.leadSource === 'user_app' ? 'badge-purple' :
-            row.leadSource === 'walk_in' ? 'badge-amber' : 'badge-gray'
-          }`}>
-            {row.leadSource === 'user_app' ? 'User App' :
-             row.leadSource === 'walk_in' ? 'Walk In' :
-             row.leadSource === 'whatsapp' ? 'WhatsApp' :
-             row.leadSource === 'website' ? 'Website' : 'Other'}
-          </span>
-        )}
-        {row.corrected && <span className="badge badge-blue">Corrected</span>}
-      </div>
-      <RowActions status={row.status} locked={row.locked} busy={busy}
-        onVerify={() => run('verify')} onRestore={() => run('restore')}
-        onEdit={() => onEdit(row)} onCancel={() => onCancel(row)} />
+      {/* 7. Footer Action Buttons */}
+      <RowActions
+        status={row.status}
+        locked={row.locked}
+        busy={busy}
+        onVerify={() => run('verify')}
+        onRestore={() => run('restore')}
+        onEdit={() => onEdit(row)}
+        onCancel={() => onCancel(row)}
+      />
+
       <HistoryList history={row.verification?.history} />
     </div>
   );
 }
 
-export default function B2CTab({ rows, focusId }) {
+export default function B2CTab({ rows, focusId, range }) {
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState('todo');
+  const [filter, setFilter] = useState('all');
   const [leadFilter, setLeadFilter] = useState('all');
   const [editing, setEditing] = useState(null);
   const [editingPayment, setEditingPayment] = useState(null);
   const [cancelling, setCancelling] = useState(null);
+  const [lastEditedId, setLastEditedId] = useState(null);
+  const [pricesCatalog, setPricesCatalog] = useState({});
+
+  useEffect(() => {
+    fetchPricesCatalog().then(setPricesCatalog).catch((err) => console.error('fetchPricesCatalog error:', err));
+  }, []);
 
   useEffect(() => {
     if (!focusId) return;
@@ -279,7 +417,12 @@ export default function B2CTab({ rows, focusId }) {
     requestAnimationFrame(() => document.getElementById(`b2c-${focusId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
   }, [focusId]);
 
-  const counts = useMemo(() => Object.fromEntries(STATUS_FILTERS.map((f) => [f.id, rows.filter((r) => matchesFilter(r, f.id)).length])), [rows]);
+  const counts = useMemo(() => {
+    return Object.fromEntries(
+      STATUS_FILTERS.map((f) => [f.id, rows.filter((r) => matchesFilter(r, f.id, lastEditedId)).length])
+    );
+  }, [rows, lastEditedId]);
+
   const delayedCount = useMemo(() => rows.filter((r) => r.isDelayed).length, [rows]);
 
   const leadCounts = useMemo(() => {
@@ -295,12 +438,23 @@ export default function B2CTab({ rows, focusId }) {
   const list = useMemo(() => {
     const q = search.trim().toLowerCase();
     return rows.filter((r) => {
-      if (!matchesFilter(r, filter)) return false;
+      if (!matchesFilter(r, filter, lastEditedId)) return false;
+
+      // Filter by date range:
+      // If user is explicitly viewing 'delayed', show delayed orders.
+      // Otherwise, only show orders belonging to the selected date range OR if it was just edited.
+      // This stops past delayed orders from 22 Oct of last year from dominating today's view!
+      if (filter !== 'delayed' && range?.from && range?.to) {
+        const inRange = (r.pickupDay >= range.from && r.pickupDay <= range.to) ||
+                        (r.dropDay && r.dropDay >= range.from && r.dropDay <= range.to);
+        if (!inRange && r.id !== lastEditedId) return false;
+      }
+
       if (leadFilter !== 'all' && (r.leadSource || 'other') !== leadFilter) return false;
       if (q && !r.customer.toLowerCase().includes(q) && !r.phone.includes(q) && !r.id.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [rows, search, filter, leadFilter]);
+  }, [rows, search, filter, leadFilter, range, lastEditedId]);
 
   // Keep the open sheets on live rows.
   const liveEditing = editing && rows.find((r) => r.id === editing.id);
@@ -383,6 +537,7 @@ export default function B2CTab({ rows, focusId }) {
               key={r.id}
               row={r}
               highlight={r.id === focusId}
+              isJustEdited={r.id === lastEditedId}
               onEdit={setEditing}
               onCancel={setCancelling}
               onEditPayment={setEditingPayment}
@@ -391,12 +546,22 @@ export default function B2CTab({ rows, focusId }) {
         </div>
       )}
 
-      {liveEditing && <EditSheet row={liveEditing} onClose={() => setEditing(null)} />}
+      {liveEditing && (
+        <EditSheet
+          row={liveEditing}
+          pricesCatalog={pricesCatalog}
+          onSaved={(id) => setLastEditedId(id)}
+          onClose={() => setEditing(null)}
+        />
+      )}
       {liveEditingPayment && <EditPaymentSheet row={liveEditingPayment} onClose={() => setEditingPayment(null)} />}
       {cancelling && (
-        <ReasonSheet title={`Cancel ${cancelling.customer}'s order record`} confirmLabel="Cancel record"
+        <ReasonSheet
+          title={`Cancel ${cancelling.customer}'s order record`}
+          confirmLabel="Cancel record"
           onClose={() => setCancelling(null)}
-          onConfirm={(reason) => saveB2cVerification(cancelling, 'cancel', { lines: cancelling.lines, reason })} />
+          onConfirm={(reason) => saveB2cVerification(cancelling, 'cancel', { lines: cancelling.lines, reason })}
+        />
       )}
     </div>
   );

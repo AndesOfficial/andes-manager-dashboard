@@ -196,14 +196,20 @@ export function getDropDay(o) {
 /** Rider-recorded order weight, newest field first. */
 /** Assumed average weights (in kg) for bedsheets and per-piece items. Easily editable. */
 export const ITEM_AVERAGE_WEIGHTS = {
-  'single bedsheet': 0.5,
-  'double bedsheet': 0.8,
-  'bedsheet': 0.5,
+  'single bedsheet': 0.47,
+  'single bed sheet': 0.47,
+  'double bedsheet': 0.87,
+  'double bed sheet': 0.87,
+  'bedsheet': 0.47,
+  'duvet cover single': 0.92,
+  'single duvet cover': 0.92,
+  'duvet cover double': 1.5,
+  'double duvet cover': 1.5,
   'duvet cover': 1.0,
-  'pillow cover': 0.15,
+  'pillow cover': 0.175,
   'pillow': 0.5,
-  'bath towel': 0.4,
-  'towel': 0.35,
+  'bath towel': 0.72,
+  'towel': 0.72,
   'hand towel': 0.15,
   'face towel': 0.1,
   'bath mat': 0.3,
@@ -394,9 +400,13 @@ export function buildB2cRow(order, verification, categories, referenceDay = istD
   return {
     id: order.id,
     order,
+    globalOrderNumber: order.globalOrderNumber || null,
     leadSource,
     pickupDay: pickup,
     dropDay: drop,
+    pickupSlot: order.pickupSlot || (typeof order.pickupTime === 'string' ? order.pickupTime : null),
+    dropSlot: order.dropSlot || (typeof order.dropTime === 'string' ? order.dropTime : typeof order.deliveryTime === 'string' ? order.deliveryTime : null),
+    createdAt: order.createdAt || null,
     delayedDays,
     isDelayed,
     isDelivered,
@@ -413,6 +423,93 @@ export function buildB2cRow(order, verification, categories, referenceDay = istD
     locked: !!v.adminLockedAt,
     kg: sumKg(lines),
     clothes: sumQty(lines),
+  };
+}
+
+/**
+ * Calculates updated B2C price when weights or quantities are edited.
+ * Uses order breakdown rates, order.services rates, order.ratePerKg, or prices catalog.
+ */
+export function calculateB2cPrice(order, lines, pricesCatalog = {}) {
+  if (!order) return { subtotal: 0, total: 0, perKgRate: 79, items: [] };
+
+  // 1. Determine rate per kg for wash lines
+  let perKgRate = num(order.ratePerKg);
+  if (!perKgRate && order.breakdown?.perKg?.items?.length) {
+    perKgRate = num(order.breakdown.perKg.items[0]?.rate);
+  }
+  if (!perKgRate && Array.isArray(order.services)) {
+    for (const s of order.services) {
+      if (typeof s === 'object' && s) {
+        const r = num(s.pricePerKg ?? s.rate ?? s.price);
+        const name = String(s.service ?? s.serviceName ?? s.name ?? '').toLowerCase();
+        const unit = String(s.unit ?? s.unitName ?? '').toLowerCase();
+        if (r > 0 && (unit.includes('kg') || name.includes('wash'))) {
+          perKgRate = r;
+          break;
+        }
+      }
+    }
+  }
+  if (!perKgRate) {
+    const wf = pricesCatalog['wash & fold'] || pricesCatalog['wash and fold'] || pricesCatalog['wash_fold'];
+    if (wf) perKgRate = num(wf.pricePerKg ?? wf.rate ?? wf.price);
+  }
+  if (!perKgRate) perKgRate = 79; // standard default rate
+
+  let perKgSubtotal = 0;
+  let perPieceSubtotal = 0;
+  const items = [];
+
+  for (const l of lines) {
+    const isKg = l.group === 'wash_fold' || l.group === 'wash_iron';
+    if (isKg) {
+      const wt = round1(l.kg);
+      let rate = perKgRate;
+      const bItem = order.breakdown?.perKg?.items?.find((it) => cleanName(it.name).toLowerCase() === cleanName(l.name).toLowerCase());
+      if (bItem && num(bItem.rate) > 0) rate = num(bItem.rate);
+      const lineAmt = Math.round(wt * rate);
+      perKgSubtotal += lineAmt;
+      items.push({ name: l.name, group: l.group, isKg: true, rate, weight: wt, qty: num(l.qty), amount: lineAmt });
+    } else {
+      const qty = num(l.qty);
+      let pieceRate = 0;
+      const bItem = order.breakdown?.perPiece?.items?.find((it) => cleanName(it.name).toLowerCase() === cleanName(l.name).toLowerCase());
+      if (bItem && num(bItem.rate) > 0) {
+        pieceRate = num(bItem.rate);
+      } else if (Array.isArray(order.services)) {
+        const s = order.services.find((it) => typeof it === 'object' && it && cleanName(it.service ?? it.serviceName ?? it.name).toLowerCase() === cleanName(l.name).toLowerCase());
+        if (s) pieceRate = num(s.price ?? s.rate);
+      }
+      if (!pieceRate) {
+        const pDoc = pricesCatalog[cleanName(l.name).toLowerCase()] || pricesCatalog[String(l.name).toLowerCase()];
+        if (pDoc) pieceRate = num(pDoc.price ?? pDoc.rate ?? pDoc.pricePerPiece);
+      }
+      const lineAmt = Math.round(qty * pieceRate);
+      perPieceSubtotal += lineAmt;
+      items.push({ name: l.name, group: l.group, isKg: false, rate: pieceRate, qty, amount: lineAmt });
+    }
+  }
+
+  const subtotal = perKgSubtotal + perPieceSubtotal;
+  const deliveryCharge = num(order.deliveryCharge);
+  const convenienceFee = num(order.convenienceFee);
+  const couponDiscount = num(order.couponDiscount ?? order.coupon_discount);
+  const promotionDiscount = num(order.promotionDiscount ?? order.promoDiscount);
+  const walletAmountUsed = num(order.walletAmountUsed);
+
+  const total = Math.max(0, Math.round(subtotal + deliveryCharge + convenienceFee - couponDiscount - promotionDiscount - walletAmountUsed));
+
+  return {
+    subtotal,
+    total,
+    perKgRate,
+    perKgSubtotal,
+    perPieceSubtotal,
+    deliveryCharge,
+    convenienceFee,
+    discounts: couponDiscount + promotionDiscount + walletAmountUsed,
+    items,
   };
 }
 

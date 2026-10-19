@@ -119,6 +119,26 @@ export async function fetchServiceCategories() {
   return map;
 }
 
+/** Full price catalog with rates, categories and units for client-side price calculation. */
+export async function fetchPricesCatalog() {
+  const snap = await getDocs(collection(db, 'prices'));
+  const map = {};
+  snap.docs.forEach((d) => {
+    const data = d.data();
+    const name = String(data.serviceName || '').trim().toLowerCase();
+    if (name) {
+      map[name] = {
+        name: data.serviceName,
+        category: data.category || '',
+        price: Number(data.price ?? data.rate ?? data.pricePerPiece ?? 0),
+        pricePerKg: Number(data.pricePerKg ?? data.perKg ?? data.rate ?? data.price ?? 0),
+        unit: data.unit || data.unitName || '',
+      };
+    }
+  });
+  return map;
+}
+
 /* ---- date helpers: day = 'YYYY-MM-DD' in India time ---- */
 
 const dayStart = (day) => new Date(`${day}T00:00:00+05:30`);
@@ -151,23 +171,33 @@ const verCol = collection(db, 'managerVerifications');
 
 export function subscribeVerifications(from, to, callback, onError) {
   const lookbackDay = dayAfter(from, -PICKUP_LOOKBACK_DAYS).toISOString().slice(0, 10);
-  return onSnapshot(query(verCol, where('pickupDate', '>=', lookbackDay), where('pickupDate', '<=', to)), (snap) => {
+  const forwardDay = dayAfter(to, 14).toISOString().slice(0, 10);
+  return onSnapshot(query(verCol, where('pickupDate', '>=', lookbackDay), where('pickupDate', '<=', forwardDay)), (snap) => {
     callback(Object.fromEntries(snap.docs.map((d) => [d.id, d.data()])));
   }, onError);
 }
 
 /**
- * Verify / correct / cancel / restore a B2C order. Never touches `cartdetails`,
- * so the customer's bill is unaffected. Refuses once Admin has counted it.
+ * Verify / correct / cancel / restore a B2C order.
+ * When editing weight/clothes, also updates `cartdetails` with the corrected
+ * measurements and recalculated price so customer/rider apps reflect it and
+ * server triggers recalculate the official breakdown.
  */
-export async function saveB2cVerification(row, action, { lines, reason = '', changes = [] } = {}) {
+export async function saveB2cVerification(row, action, { lines, reason = '', changes = [], calculatedTotal = null } = {}) {
   const ref = doc(verCol, row.id);
+  const cartRef = doc(db, 'cartdetails', row.id);
+
   await runTransaction(db, async (tx) => {
     const snap = await tx.get(ref);
     const cur = snap.exists() ? snap.data() : {};
     if (cur.adminLockedAt) throw new Error('Admin has already counted this order. Ask Admin for an adjustment.');
+
     const status = action === 'cancel' ? 'cancelled' : action === 'restore' ? 'pending' : 'verified';
-    tx.set(ref, {
+    const activeLines = lines || cur.lines || row.rider;
+    const totalKg = Math.round(activeLines.reduce((s, l) => s + (Number(l.kg) || 0), 0) * 10) / 10;
+    const totalClothes = activeLines.reduce((s, l) => s + (Number(l.qty) || 0), 0);
+
+    const verPayload = {
       source: 'b2c',
       orderId: row.id,
       pickupDate: row.pickupDay,
@@ -175,14 +205,65 @@ export async function saveB2cVerification(row, action, { lines, reason = '', cha
       status,
       riderSig: row.riderSig,
       riderLines: row.rider,
-      lines: lines || cur.lines || row.rider,
-      kg: (lines || cur.lines || row.rider).reduce((s, l) => s + (Number(l.kg) || 0), 0),
-      clothes: (lines || cur.lines || row.rider).reduce((s, l) => s + (Number(l.qty) || 0), 0),
+      lines: activeLines,
+      kg: totalKg,
+      clothes: totalClothes,
       history: [...(cur.history || []), historyEntry(action, reason, changes)],
       updatedAt: serverTimestamp(),
       updatedBy: actor(),
       ...(status === 'verified' ? { verifiedAt: serverTimestamp(), verifiedBy: actor() } : {}),
-    }, { merge: true });
+    };
+
+    if (calculatedTotal !== null && !isNaN(Number(calculatedTotal)) && Number(calculatedTotal) > 0) {
+      verPayload.payment = {
+        ...(cur.payment || {}),
+        amount: Number(calculatedTotal),
+        updatedAt: new Date().toISOString(),
+        updatedBy: actor(),
+      };
+    }
+
+    tx.set(ref, verPayload, { merge: true });
+
+    // When manager edits weights or lines, also update cartdetails
+    if (action === 'edit') {
+      const cartSnap = await tx.get(cartRef);
+      if (cartSnap.exists()) {
+        const cartData = cartSnap.data();
+        const existingPerKg = cartData.perKgDetails || {};
+        const updatedPerKg = { ...existingPerKg };
+
+        activeLines.forEach((l) => {
+          if (l.group === 'wash_fold' || l.group === 'wash_iron') {
+            updatedPerKg[l.name] = {
+              ...(updatedPerKg[l.name] || {}),
+              weight: Number(l.kg) || 0,
+              count: Number(l.qty) || 0,
+            };
+          }
+        });
+
+        const cartPatch = {
+          clothesWeightKg: totalKg,
+          internalWeightKg: totalKg,
+          riderRecordedWeightKg: totalKg,
+          clothesCount: totalClothes,
+          clothes: totalClothes,
+          totalPieces: totalClothes,
+          perKgDetails: updatedPerKg,
+          weightUpdatedAt: serverTimestamp(),
+          weightUpdatedBy: actor(),
+          updatedAt: serverTimestamp(),
+        };
+
+        if (calculatedTotal !== null && !isNaN(Number(calculatedTotal)) && Number(calculatedTotal) > 0) {
+          cartPatch.totalCost = Number(calculatedTotal);
+          cartPatch.totalAmount = Number(calculatedTotal);
+        }
+
+        tx.update(cartRef, cartPatch);
+      }
+    }
   });
 }
 

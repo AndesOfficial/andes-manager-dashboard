@@ -11,7 +11,22 @@ export const shiftDay = (day, n) => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 export const fmtKg = (n) => `${(Number(n) || 0).toFixed(1)} kg`;
-export const fmtDay = (day) => new Date(`${day}T00:00:00`).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
+export const fmtDay = (day) => {
+  if (!day) return '—';
+  try {
+    const d = new Date(`${day}T00:00:00`);
+    if (isNaN(d.getTime())) return String(day);
+    const isCurrentYear = d.getFullYear() === new Date().getFullYear();
+    return d.toLocaleDateString('en-IN', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+      ...(isCurrentYear ? {} : { year: 'numeric' }),
+    });
+  } catch (_) {
+    return String(day);
+  }
+};
 
 export function Badge({ tone = 'gray', children, title }) {
   return <span className={`badge badge-${tone}`} title={title}>{children}</span>;
@@ -110,9 +125,10 @@ export const STATUS_FILTERS = [
   { id: 'verified', label: 'Verified' },
   { id: 'cancelled', label: 'Cancelled' },
 ];
-export const matchesFilter = (rowOrStatus, filter) => {
+export const matchesFilter = (rowOrStatus, filter, keepRowId = null) => {
   if (filter === 'all') return true;
   if (rowOrStatus && typeof rowOrStatus === 'object') {
+    if (keepRowId && rowOrStatus.id === keepRowId) return true;
     if (filter === 'delayed') return !!rowOrStatus.isDelayed;
     const status = rowOrStatus.status;
     if (filter === 'todo') return status === 'pending' || status === 'changed';
