@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, CheckCircle2, Pencil, Ban, RotateCcw, Loader2, History, Lock } from 'lucide-react';
+import { X, CheckCircle2, Pencil, Ban, RotateCcw, Loader2, History, Lock, Trash2 } from 'lucide-react';
 
 export const todayStr = () => {
   const d = new Date();
@@ -139,13 +139,16 @@ export const matchesFilter = (rowOrStatus, filter, keepRowId = null) => {
   return status === filter;
 };
 
-/** Verify / Edit / Cancel (or Restore) buttons shared by B2B and B2C rows. */
-export function RowActions({ status, locked, busy, onVerify, onEdit, onCancel, onRestore, isB2b = false }) {
+/** Verify / Edit / Cancel (or Restore) / Delete buttons shared by B2B and B2C rows. */
+export function RowActions({ status, locked, busy, onVerify, onEdit, onCancel, onRestore, onDelete, isB2b = false }) {
   if (locked) return null;
   if (status === 'cancelled') {
     return (
       <div className="row-actions">
         <button className="btn-ghost" disabled={busy} onClick={onRestore}><RotateCcw size={14} /> Restore</button>
+        {onDelete && (
+          <button className="btn-ghost btn-ghost-red" disabled={busy} onClick={onDelete}><Trash2 size={14} /> Delete</button>
+        )}
       </div>
     );
   }
@@ -160,7 +163,42 @@ export function RowActions({ status, locked, busy, onVerify, onEdit, onCancel, o
       {(!isB2b || status !== 'verified') && (
         <button className="btn-ghost btn-ghost-red" disabled={busy} onClick={onCancel}><Ban size={14} /> Cancel</button>
       )}
+      {onDelete && (
+        <button className="btn-ghost btn-ghost-red" disabled={busy} onClick={onDelete}><Trash2 size={14} /> Delete</button>
+      )}
     </div>
+  );
+}
+
+/** Asks for confirmation before permanent deletion. */
+export function ConfirmDeleteSheet({ title, message, confirmLabel = 'Delete permanently', onConfirm, onClose }) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const handleConfirm = async () => {
+    setSaving(true);
+    try {
+      await onConfirm();
+      onClose();
+    } catch (err) {
+      setError(err.message);
+      setSaving(false);
+    }
+  };
+  return (
+    <Sheet title={title} onClose={onClose}>
+      <div style={{ padding: '8px 0 16px' }}>
+        <p style={{ color: '#64748b', fontSize: 14, marginBottom: 16 }}>{message}</p>
+        {error && <div className="form-error" style={{ marginBottom: 12 }}>{error}</div>}
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button type="button" className="btn-ghost" disabled={saving} onClick={onClose} style={{ flex: 1 }}>
+            Cancel
+          </button>
+          <button type="button" className="btn-danger" disabled={saving} onClick={handleConfirm} style={{ flex: 1, justifyContent: 'center' }}>
+            {saving ? <Loader2 size={16} className="spin" /> : <Trash2 size={16} />} {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </Sheet>
   );
 }
 

@@ -375,6 +375,18 @@ export async function updateB2bEntry(id, action, { patch = {}, reason = '', chan
   });
 }
 
+/** Permanently deletes a B2B entry. */
+export async function deleteB2bEntry(id) {
+  const ref = doc(b2bEntryCol, id);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return;
+  const cur = snap.data();
+  if (cur.adminLockedAt) {
+    throw new Error('Admin has already counted this entry. Ask Admin for an adjustment.');
+  }
+  await deleteDoc(ref);
+}
+
 /* ---- store-app B2B orders for the same day (reference only, never totalled) ---- */
 
 export async function fetchStoreB2bReference(from, to) {

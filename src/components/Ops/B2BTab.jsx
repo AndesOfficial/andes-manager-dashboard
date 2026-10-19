@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Plus, Trash2, Loader2, Info, Camera, Image as ImageIcon, X } from 'lucide-react';
-import { addB2bEntry, updateB2bEntry, fetchStoreB2bReference, uploadB2bPhoto } from '../../firebase';
+import { addB2bEntry, updateB2bEntry, deleteB2bEntry, fetchStoreB2bReference, uploadB2bPhoto } from '../../firebase';
 import { num, round1, calculateB2bBatchRevenue, calculateBatchWeight, isHostel99Client, getDaysInMonth, HOSTEL_99_MONTHLY_REVENUE } from '../../lib/orders';
 import {
-  fmtKg, fmtDay, todayStr, EmptyState, Sheet, StatusBadge, RowActions, ReasonSheet, HistoryList,
+  fmtKg, fmtDay, todayStr, EmptyState, Sheet, StatusBadge, RowActions, ReasonSheet, ConfirmDeleteSheet, HistoryList,
   STATUS_FILTERS, matchesFilter,
 } from './shared';
 
@@ -61,7 +61,7 @@ export function getClientCatalogue(clientName) {
 }
 
 /** Add (entry = null) or correct an existing B2B entry. */
-function EntrySheet({ entry, defaultDate, clients, onClose }) {
+function EntrySheet({ entry, defaultDate, clients, onClose, onDelete }) {
   const isEdit = !!entry;
   const [form, setForm] = useState(() => entry
     ? { ...entry, items: entry.items || [], students: entry.students ?? '', photoUrl: entry.photoUrl || '' }
@@ -356,6 +356,20 @@ function EntrySheet({ entry, defaultDate, clients, onClose }) {
           {saving ? <Loader2 size={16} className="spin" /> : null}{' '}
           {uploadingPhoto ? 'Uploading photo...' : isEdit ? 'Save changes' : 'Add entry'}
         </button>
+        {isEdit && onDelete && (
+          <button
+            className="btn-danger"
+            type="button"
+            disabled={saving}
+            onClick={() => {
+              onClose();
+              onDelete(entry);
+            }}
+            style={{ width: '100%', marginTop: 10, justifyContent: 'center' }}
+          >
+            <Trash2 size={16} /> Delete this batch
+          </button>
+        )}
       </form>
     </Sheet>
   );
@@ -378,7 +392,7 @@ function PhotoModal({ url, title, onClose }) {
   );
 }
 
-function EntryRow({ entry, countOnDate = 1, onEdit, onCancel, onZoomPhoto }) {
+function EntryRow({ entry, countOnDate = 1, onEdit, onCancel, onDelete, onZoomPhoto }) {
   const [busy, setBusy] = useState(false);
   const run = async (action) => {
     setBusy(true);
@@ -432,7 +446,7 @@ function EntryRow({ entry, countOnDate = 1, onEdit, onCancel, onZoomPhoto }) {
       </div>
       <RowActions status={entry.status} locked={!!entry.adminLockedAt} busy={busy} isB2b={true}
         onVerify={() => run('verify')} onRestore={() => run('restore')}
-        onEdit={() => onEdit(entry)} onCancel={() => onCancel(entry)} />
+        onEdit={() => onEdit(entry)} onCancel={() => onCancel(entry)} onDelete={() => onDelete(entry)} />
       <HistoryList history={entry.history} />
     </div>
   );
@@ -475,6 +489,7 @@ export default function B2BTab({ range, entries, clients, adding, onAddClose }) 
   const [filter, setFilter] = useState('all');
   const [editing, setEditing] = useState(null);
   const [cancelling, setCancelling] = useState(null);
+  const [deleting, setDeleting] = useState(null);
   const [zoomPhoto, setZoomPhoto] = useState(null);
 
   const clientList = useMemo(() => Array.from(new Set([
@@ -559,6 +574,7 @@ export default function B2BTab({ range, entries, clients, adding, onAddClose }) 
               countOnDate={isHostel99Client(e.client) ? (h99CountsByDate[e.date] || 1) : 1}
               onEdit={setEditing}
               onCancel={setCancelling}
+              onDelete={setDeleting}
               onZoomPhoto={(url, title) => setZoomPhoto({ url, title })}
             />
           ))}
@@ -569,12 +585,23 @@ export default function B2BTab({ range, entries, clients, adding, onAddClose }) 
 
       {(adding || editing) && (
         <EntrySheet entry={editing} defaultDate={range.to} clients={clientList}
-          onClose={() => { setEditing(null); onAddClose(); }} />
+          onClose={() => { setEditing(null); onAddClose(); }} onDelete={setDeleting} />
       )}
       {cancelling && (
         <ReasonSheet title={`Cancel ${cancelling.client} batch ${cancelling.batchNo}`} confirmLabel="Cancel entry"
           onClose={() => setCancelling(null)}
           onConfirm={(reason) => updateB2bEntry(cancelling.id, 'cancel', { reason })} />
+      )}
+      {deleting && (
+        <ConfirmDeleteSheet
+          title={`Delete ${deleting.client} Batch #${deleting.batchNo}`}
+          message={`Are you sure you want to permanently delete this ${deleting.client} batch from ${fmtDay(deleting.date)}? This action cannot be undone.`}
+          confirmLabel="Delete permanently"
+          onClose={() => setDeleting(null)}
+          onConfirm={async () => {
+            await deleteB2bEntry(deleting.id);
+          }}
+        />
       )}
       {zoomPhoto && (
         <PhotoModal
