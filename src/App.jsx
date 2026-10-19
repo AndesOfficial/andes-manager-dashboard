@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Plus, Loader2, Home, Users, LogOut, Boxes, LayoutDashboard, Building2, Archive,
+  Plus, Loader2, Home, Users, LogOut, Boxes, LayoutDashboard, Building2, Archive, AlertCircle,
 } from 'lucide-react';
 import InventoryTab from './components/Inventory/InventoryTab';
 import OverviewTab from './components/Ops/OverviewTab';
 import B2CTab from './components/Ops/B2CTab';
 import B2BTab from './components/Ops/B2BTab';
+import IssuesTab from './components/Issues/IssuesTab';
 import ArchiveTab from './components/Ops/ArchiveTab';
 import { RangeBar, todayStr, rangeLabel } from './components/Ops/shared';
 import useRangeData from './hooks/useDayData';
@@ -17,6 +18,7 @@ const TABS = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard, title: 'Dashboard Overview' },
   { id: 'b2b', label: 'B2B', icon: Building2, title: 'B2B Entries' },
   { id: 'b2c', label: 'B2C', icon: Users, title: 'B2C Orders' },
+  { id: 'issues', label: 'Issues', icon: AlertCircle, title: 'Operations Issues' },
   { id: 'inventory', label: 'Inventory', icon: Boxes, title: 'Inventory' },
   { id: 'archive', label: 'Archive', icon: Archive, title: 'Archive' },
 ];
@@ -199,6 +201,7 @@ export default function App() {
             <h1>{current.title}</h1>
             <p>{isDayTab
               ? `${rangeLabel(range)} · ${toVerify ? `${toVerify} to verify` : 'all verified'}`
+              : tab === 'issues' ? 'Report & monitor B2B and B2C operational issues'
               : tab === 'inventory' ? 'Daily stock, cleanliness, vehicle & utility log' : 'Old hand-typed records'}</p>
           </div>
           <div className="header-actions">{addButton}</div>
@@ -235,6 +238,8 @@ export default function App() {
             <B2BTab range={range} entries={data.b2bEntries} clients={hostels} adding={adding} onAddClose={() => setAdding(false)} />
           ) : tab === 'b2c' ? (
             <B2CTab rows={data.b2cRows} focusId={focusId} />
+          ) : tab === 'issues' ? (
+            <IssuesTab clients={hostels} />
           ) : tab === 'inventory' ? (
             <InventoryTab />
           ) : (

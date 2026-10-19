@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Plus, Trash2, Loader2, Info, Camera, X } from 'lucide-react';
+import { Plus, Trash2, Loader2, Info, Camera, Image as ImageIcon, X } from 'lucide-react';
 import { addB2bEntry, updateB2bEntry, fetchStoreB2bReference, uploadB2bPhoto } from '../../firebase';
 import { num, round1 } from '../../lib/orders';
 import {
@@ -216,23 +216,44 @@ function EntrySheet({ entry, defaultDate, clients, onClose }) {
           {photoPreview ? (
             <div className="b2b-photo-preview-wrap">
               <img src={photoPreview} alt="Challan preview" className="b2b-photo-thumb" />
-              <div className="b2b-photo-actions">
+              <div className="b2b-photo-actions" style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 <label className="btn-ghost" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                  <Camera size={14} /> Change photo
+                  <Camera size={14} /> Camera
                   <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handlePhotoSelect} />
                 </label>
-                <button type="button" className="btn-ghost" style={{ color: 'var(--red)' }} onClick={removePhoto}>
+                <label className="btn-ghost" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <ImageIcon size={14} /> Gallery
+                  <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handlePhotoSelect} />
+                </label>
+                <button type="button" className="btn-ghost" style={{ color: 'var(--red)', display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={removePhoto}>
                   <Trash2 size={14} /> Remove photo
                 </button>
               </div>
             </div>
           ) : (
-            <label className="b2b-photo-dropzone">
-              <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handlePhotoSelect} />
-              <Camera size={22} className="ops-muted" />
-              <span className="b2b-photo-dropzone-title">Upload or take photo</span>
-              <span className="ops-muted" style={{ fontSize: 12 }}>Attach challan receipt or clothes photo (optional)</span>
-            </label>
+            <div className="b2b-photo-dropzone" style={{ padding: '20px 16px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                <Camera size={22} className="ops-muted" />
+                <span style={{ color: '#cbd5e1' }}>|</span>
+                <ImageIcon size={22} className="ops-muted" />
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <span className="b2b-photo-dropzone-title" style={{ display: 'block', fontWeight: 600, fontSize: 13, marginBottom: 2 }}>
+                  Add Challan / Clothes Photo
+                </span>
+                <span className="ops-muted" style={{ fontSize: 12 }}>Attach receipt or clothes photo (optional)</span>
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 4, width: '100%', maxWidth: 280 }}>
+                <label className="btn-secondary" style={{ flex: 1, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 12, padding: '7px 10px', borderRadius: 8, background: '#f1f5f9', border: '1px solid #cbd5e1', fontWeight: 600 }}>
+                  <Camera size={14} /> Take Photo
+                  <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handlePhotoSelect} />
+                </label>
+                <label className="btn-secondary" style={{ flex: 1, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 12, padding: '7px 10px', borderRadius: 8, background: '#f1f5f9', border: '1px solid #cbd5e1', fontWeight: 600 }}>
+                  <ImageIcon size={14} /> Gallery
+                  <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handlePhotoSelect} />
+                </label>
+              </div>
+            </div>
           )}
         </div>
 

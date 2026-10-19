@@ -455,3 +455,61 @@ export async function deleteJuteBag(bagId) {
         bagHistory(tx, bagId, 'deleted');
     });
 }
+
+/* ---- Manager Issues: Operations issue tracking for B2B and B2C ---- */
+
+const managerIssuesCol = collection(db, 'manager_issues');
+
+/** Subscribe to live updates of manager issues */
+export function subscribeManagerIssues(callback, onError) {
+  const q = query(managerIssuesCol, limit(300));
+  return onSnapshot(q, (snap) => {
+    const list = snap.docs.map((d) => {
+      const data = d.data();
+      return {
+        id: d.id,
+        ...data,
+        createdAtDate: data.createdAt?.toDate ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : new Date()),
+      };
+    }).sort((a, b) => b.createdAtDate - a.createdAtDate);
+    callback(list);
+  }, onError);
+}
+
+/** Add a new manager issue (B2B or B2C) */
+export async function addManagerIssue(issue) {
+  const id = `issue_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const ref = doc(managerIssuesCol, id);
+  const now = new Date();
+  const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+  const issueDoc = {
+    ...issue,
+    id,
+    date: issue.date || dateStr,
+    status: issue.status || 'pending', // 'pending' | 'checking' | 'resolved'
+    severity: issue.severity || 'normal', // 'normal' | 'high' | 'critical'
+    scope: issue.scope || 'b2c', // 'b2b' | 'b2c'
+    reportedBy: actor(),
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+
+  await setDoc(ref, issueDoc);
+  return id;
+}
+
+/** Update an existing manager issue */
+export async function updateManagerIssue(id, patch = {}) {
+  const ref = doc(managerIssuesCol, id);
+  await setDoc(ref, {
+    ...patch,
+    updatedAt: serverTimestamp(),
+    lastUpdatedBy: actor(),
+  }, { merge: true });
+}
+
+/** Upload issue proof photo to Firebase Storage */
+export async function uploadIssuePhoto(file) {
+  return uploadB2bPhoto(file, 'manager_issue_photos');
+}
