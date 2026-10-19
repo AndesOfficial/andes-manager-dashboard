@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  ChevronLeft, ChevronRight, Save, Loader2, AlertTriangle, Sparkles, Zap, Check, X, Plus,
+  ChevronLeft, ChevronRight, Save, Loader2, AlertTriangle, Sparkles, Zap, Check, X, Plus, RotateCcw, Trash2,
 } from 'lucide-react';
-import { subscribeInventoryLogs, saveInventoryLog } from '../../firebase';
+import { subscribeInventoryLogs, saveInventoryLog, deleteInventoryLog, clearAllInventoryLogs } from '../../firebase';
 import JuteBagsSection from './JuteBagsSection';
 import { STOCK_SECTIONS, CLEANLINESS_AREAS } from '../../config/inventoryItems';
 
@@ -78,15 +78,16 @@ const hydrate = (saved) => {
   return out;
 };
 
-const remainingOf = (row, opening) => (
-  row.manual && !isBlank(row.remaining)
-    ? num(row.remaining)
-    : round(opening + num(row.added) - num(row.used))
-);
+const remainingOf = (row, opening) => {
+  if (row.manual && !isBlank(row.remaining)) return num(row.remaining);
+  if (isBlank(row.used) && isBlank(row.added) && opening === 0) return '';
+  return round(opening + num(row.added) - num(row.used));
+};
 
-const stockStatus = (remaining, item) => (
-  remaining < 0 ? 'neg' : remaining <= item.lowAt ? 'low' : 'ok'
-);
+const stockStatus = (remaining, item) => {
+  if (isBlank(remaining)) return 'ok';
+  return remaining < 0 ? 'neg' : remaining <= item.lowAt ? 'low' : 'ok';
+};
 
 /* ---------------- small UI pieces ---------------- */
 
@@ -103,7 +104,7 @@ function Widget({ tone, icon, label, value, sub }) {
   );
 }
 
-function NumInput({ value, onChange, placeholder = '0', ...rest }) {
+function NumInput({ value, onChange, placeholder = '—', ...rest }) {
   return (
     <input
       className="form-input inv-num" type="number" inputMode="decimal" min="0" step="any"
@@ -123,22 +124,25 @@ function StockRow({ item, row, opening, date, onChange, inputRemainingMode = fal
   const [open, setOpen] = useState(false);
   const [qty, setQty] = useState('');
   const [note, setNote] = useState('');
-  const inventory = round(opening + num(row.added));
+  const adds = addsOf(row);
+  const hasInv = opening > 0 || !isBlank(row.added) || adds.length > 0;
+  const inventory = hasInv ? round(opening + num(row.added)) : '—';
 
   // If inputRemainingMode (chemicals, stain removers):
   // manager enters remaining. used = inventory - remaining.
   // If standard mode (packaging, other):
   // manager enters used. remaining = inventory - used.
   const remaining = inputRemainingMode
-    ? (!isBlank(row.remaining) ? num(row.remaining) : inventory)
+    ? (!isBlank(row.remaining) ? num(row.remaining) : (hasInv ? inventory : ''))
     : remainingOf(row, opening);
 
   const calculatedUsed = inputRemainingMode
-    ? (!isBlank(row.remaining) ? round(inventory - num(row.remaining)) : (row.used !== '' && row.used !== undefined ? row.used : '—'))
+    ? (!isBlank(row.remaining) && hasInv
+        ? round(num(inventory) - num(row.remaining))
+        : (!isBlank(row.used) ? row.used : '—'))
     : row.used;
 
   const status = stockStatus(remaining, item);
-  const adds = addsOf(row);
   // Days saved before entries existed only have a total.
   const legacy = adds.length === 0 && num(row.added) > 0 ? num(row.added) : 0;
 
@@ -183,25 +187,27 @@ function StockRow({ item, row, opening, date, onChange, inputRemainingMode = fal
               {calculatedUsed}
             </span>
           ) : (
-            <NumInput value={row.used} onChange={(v) => onChange({ used: v })} />
+            <NumInput value={row.used ?? ''} placeholder="—" onChange={(v) => onChange({ used: v })} />
           )}
         </span>
         <span className="inv-cell col-rem" data-label="Remaining">
           {inputRemainingMode ? (
             <NumInput
-              value={row.remaining}
+              value={row.remaining ?? ''}
               className="form-input inv-num"
-              placeholder="0"
+              placeholder="—"
               title="Enter current physical count / remaining stock."
               onChange={(v) => {
-                const usedVal = !isBlank(v) ? round(inventory - num(v)) : '';
+                const invVal = hasInv ? round(opening + num(row.added)) : 0;
+                const usedVal = !isBlank(v) ? round(invVal - num(v)) : '';
                 onChange({ remaining: v, used: usedVal, manual: true });
               }}
             />
           ) : (
             <NumInput
-              value={row.manual ? row.remaining : remaining}
+              value={row.manual ? (row.remaining ?? '') : (remaining !== '' ? remaining : '')}
               className={`form-input inv-num ${row.manual ? 'inv-manual' : 'inv-auto'}`}
+              placeholder="—"
               title="Auto-calculated. Type to override after a physical count."
               onChange={(v) => onChange({ remaining: v, manual: v !== '' })}
             />
@@ -352,10 +358,11 @@ export default function InventoryTab() {
     const isRemMode = s.key === 'chemicals' || s.key === 'stainRemovers';
     const row = log[s.key]?.[it.key] || {};
     const op = openings[s.key]?.[it.key] || 0;
+    const hasInv = op > 0 || !isBlank(row.added) || addsOf(row).length > 0;
     const r = isRemMode
-      ? (!isBlank(row.remaining) ? num(row.remaining) : round(op + num(row.added)))
+      ? (!isBlank(row.remaining) ? num(row.remaining) : (hasInv ? round(op + num(row.added)) : ''))
       : remainingOf(row, op);
-    if (stockStatus(r, it) !== 'ok') lowItems.push(it.label);
+    if (!isBlank(r) && stockStatus(r, it) !== 'ok') lowItems.push(it.label);
   }));
 
   const cleanDone = CLEANLINESS_AREAS.filter((a) => log.cleanliness[a.key] === true).length;
@@ -371,13 +378,14 @@ export default function InventoryTab() {
       STOCK_SECTIONS.forEach((s) => s.items.forEach((it) => {
         const row = data[s.key][it.key];
         row.date = date;
-        row.opening = openings[s.key][it.key];
-        row.inventory = round(row.opening + num(row.added));
+        row.opening = openings[s.key][it.key] ?? 0;
+        const hasInv = row.opening > 0 || !isBlank(row.added) || (row.adds && row.adds.length > 0);
+        row.inventory = hasInv ? round(row.opening + num(row.added)) : '';
         if (s.key === 'chemicals' || s.key === 'stainRemovers') {
           if (!isBlank(row.remaining)) {
-            row.used = round(row.inventory - num(row.remaining));
+            row.used = hasInv ? round(num(row.inventory) - num(row.remaining)) : '';
           } else {
-            row.remaining = round(row.inventory - num(row.used));
+            row.remaining = !isBlank(row.used) && hasInv ? round(num(row.inventory) - num(row.used)) : '';
           }
         } else {
           row.remaining = remainingOf(row, row.opening);
@@ -391,6 +399,42 @@ export default function InventoryTab() {
     } catch (err) {
       console.error(err);
       setError('Save failed: ' + (err.code === 'permission-denied' ? 'no permission to write inventory logs.' : err.message));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleClearDay = async () => {
+    if (!window.confirm(`Are you sure you want to completely clear and reset all entries for ${fmtDay(date)}?`)) return;
+    setSaving(true);
+    setError('');
+    try {
+      if (savedForDate) {
+        await deleteInventoryLog(date);
+      }
+      setLog(emptyLog());
+      setDirty(false);
+      setSavedAt(null);
+    } catch (err) {
+      console.error(err);
+      setError('Failed to clear day: ' + err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleClearAll = async () => {
+    if (!window.confirm('CAUTION: This will delete ALL saved daily inventory logs across all dates in Firestore. Jute bags and B2B/B2C orders will NOT be affected. Are you sure?')) return;
+    setSaving(true);
+    setError('');
+    try {
+      await clearAllInventoryLogs();
+      setLog(emptyLog());
+      setDirty(false);
+      setSavedAt(null);
+    } catch (err) {
+      console.error(err);
+      setError('Failed to clear all logs: ' + err.message);
     } finally {
       setSaving(false);
     }
@@ -438,7 +482,7 @@ export default function InventoryTab() {
             </>
           )}
         </div>
-        <div className="inv-save-wrap">
+        <div className="inv-save-wrap" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {dirty
             ? <span className="badge badge-amber">Unsaved changes</span>
             : savedAt
@@ -447,6 +491,16 @@ export default function InventoryTab() {
           <button className="btn-action-primary" onClick={handleSave} disabled={saving || !dirty}>
             {saving ? <Loader2 size={16} className="spin" /> : <Save size={16} />}
             <span>Save day</span>
+          </button>
+          <button
+            type="button"
+            className="btn-ghost"
+            title="Reset all inputs for this day"
+            onClick={handleClearDay}
+            disabled={saving}
+          >
+            <RotateCcw size={14} />
+            <span>Reset day</span>
           </button>
         </div>
       </div>
@@ -524,9 +578,14 @@ export default function InventoryTab() {
       <section className="panel inv-section" id="inv-cleanliness">
         <div className="inv-section-head">
           <div className="panel-title" style={{ marginBottom: 0 }}>Cleanliness log</div>
-          <button className="chip" onClick={() => edit((l) => { CLEANLINESS_AREAS.forEach((a) => { l.cleanliness[a.key] = true; }); return l; })}>
-            Mark all cleaned
-          </button>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button type="button" className="chip" onClick={() => edit((l) => { CLEANLINESS_AREAS.forEach((a) => { l.cleanliness[a.key] = true; }); return l; })}>
+              Mark all cleaned
+            </button>
+            <button type="button" className="chip" onClick={() => edit((l) => { l.cleanliness = {}; return l; })}>
+              Reset all
+            </button>
+          </div>
         </div>
         <div className="inv-check-grid">
           {CLEANLINESS_AREAS.map((a) => (
@@ -552,7 +611,15 @@ export default function InventoryTab() {
 
       {/* history */}
       <section className="panel inv-section" id="inv-history">
-        <div className="panel-title">Recent days</div>
+        <div className="inv-section-head">
+          <div className="panel-title" style={{ marginBottom: 0 }}>Recent days</div>
+          {logs.length > 0 && (
+            <button type="button" className="btn-ghost btn-ghost-red" onClick={handleClearAll} disabled={saving} style={{ fontSize: 12 }}>
+              <Trash2 size={13} />
+              <span>Clear all saved logs</span>
+            </button>
+          )}
+        </div>
         {logs.length === 0 ? (
           <div className="inv-hint">No days logged yet.</div>
         ) : (

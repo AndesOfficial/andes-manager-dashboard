@@ -10,6 +10,8 @@ import {
   getDocs,
   getDoc,
   setDoc,
+  deleteDoc,
+  writeBatch,
   limit,
   where,
   Timestamp,
@@ -298,6 +300,17 @@ export async function saveInventoryLog(date, data) {
     updatedAt: serverTimestamp(),
     updatedBy: auth.currentUser?.email || '',
   }, { merge: true });
+}
+
+export async function deleteInventoryLog(date) {
+  return deleteDoc(doc(db, 'inventoryLogs', date));
+}
+
+export async function clearAllInventoryLogs() {
+  const snap = await getDocs(inventoryCol);
+  const batch = writeBatch(db);
+  snap.docs.forEach((d) => batch.delete(d.ref));
+  await batch.commit();
 }
 
 
