@@ -16,13 +16,18 @@ const EDIT_FIELDS = [
 ];
 
 export const ONE8_CATALOGUE = [
-  'Wiping Cloth',
-  'Chef Coat',
-  'T-Shirt',
+  'Yellow Wiping Cloth',
+  'White Wiping Cloth',
+  'White Chef Coat',
+  'Black Chef Coat',
+  'Beanie Chef Cap',
   'Pant',
   'Apron',
   'Napkin',
   'Blazer',
+  'T-Shirt',
+  'Wiping Cloth',
+  'Chef Coat',
   'Cap',
 ];
 
@@ -75,12 +80,11 @@ function EntrySheet({ entry, defaultDate, clients, onClose, onDelete }) {
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
   const updateItems = (newItems) => {
-    const isLinenOrH99 = isHostel99Client(form.client) || String(form.client || '').toLowerCase().includes('zolo');
     const autoWeight = calculateBatchWeight(newItems);
     setForm((f) => ({
       ...f,
       items: newItems,
-      kg: (isLinenOrH99 && autoWeight > 0) ? autoWeight : (autoWeight > 0 && (!f.kg || f.kg === '0' || f.kg === '') ? autoWeight : f.kg),
+      kg: autoWeight > 0 ? autoWeight : f.kg,
     }));
   };
 
@@ -403,6 +407,7 @@ function EntryRow({ entry, countOnDate = 1, onEdit, onCancel, onDelete, onZoomPh
   const isH99 = isHostel99Client(entry.client);
   const isOne8 = String(entry.client || '').toLowerCase().includes('one 8') || String(entry.client || '').toLowerCase().includes('one8');
   const isZolo = String(entry.client || '').toLowerCase().includes('zolo');
+  const displayKg = num(entry.kg) > 0 ? num(entry.kg) : calculateBatchWeight(entry.items);
 
   return (
     <div className={`card ops-row ops-st-${entry.status}`}>
@@ -422,7 +427,7 @@ function EntryRow({ entry, countOnDate = 1, onEdit, onCancel, onDelete, onZoomPh
         </div>
         <div className="ops-row-kg">
           <div style={{ color: '#0f172a', fontWeight: 800, fontSize: 16 }}>
-            {fmtKg(entry.kg)}
+            {displayKg > 0 ? fmtKg(displayKg) : '—'}
           </div>
           <div className="ops-muted">{entry.clothes} pcs</div>
         </div>
@@ -520,7 +525,8 @@ export default function B2BTab({ range, entries, clients, adding, onAddClose }) 
     let totalStudents = 0;
 
     live.forEach((e) => {
-      totalKg += num(e.kg);
+      const rowKg = num(e.kg) > 0 ? num(e.kg) : calculateBatchWeight(e.items);
+      totalKg += rowKg;
       totalClothes += num(e.clothes);
       totalStudents += num(e.students);
     });

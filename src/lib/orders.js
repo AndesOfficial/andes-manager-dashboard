@@ -516,14 +516,35 @@ export function calculateB2cPrice(order, lines, pricesCatalog = {}) {
 export const HOSTEL_99_MONTHLY_REVENUE = 28000;
 
 export const ONE8_RATE_MAP = {
+  'Yellow Wiping Cloth': 9,
+  'White Wiping Cloth': 9,
   'Wiping Cloth': 9,
+  'White Chef Coat': 13,
+  'Black Chef Coat': 13,
   'Chef Coat': 13,
+  'Beanie Chef Cap': 5,
+  'Cap': 5,
   'T-Shirt': 13,
   'Pant': 13,
   'Apron': 9,
   'Napkin': 6,
   'Blazer': 200,
-  'Cap': 5,
+};
+
+export const ONE8_ITEM_WEIGHTS = {
+  'Yellow Wiping Cloth': 0.11,
+  'White Wiping Cloth': 0.135,
+  'Wiping Cloth': 0.11,
+  'White Chef Coat': 0.32,
+  'Black Chef Coat': 0.5,
+  'Chef Coat': 0.32,
+  'Beanie Chef Cap': 0.05,
+  'Cap': 0.05,
+  'T-Shirt': 0.2,
+  'Pant': 0.4,
+  'Apron': 0.15,
+  'Napkin': 0.05,
+  'Blazer': 0.8,
 };
 
 export const ZOLO_RATE_MAP = {
@@ -580,9 +601,39 @@ export function calculateBatchWeight(items) {
   for (const it of items) {
     const qty = num(it.qty ?? it.quantity);
     if (qty <= 0) continue;
-    const nameLower = String(it.name || '').trim().toLowerCase();
+    const rawName = String(it.name || '').trim();
+    const nameLower = rawName.toLowerCase();
     let unitWeight = 0;
-    if (nameLower.includes('pillow')) {
+
+    if (ONE8_ITEM_WEIGHTS[rawName] !== undefined) {
+      unitWeight = ONE8_ITEM_WEIGHTS[rawName];
+    } else if (LINEN_ITEM_WEIGHTS[rawName] !== undefined) {
+      unitWeight = LINEN_ITEM_WEIGHTS[rawName];
+    } else if (nameLower.includes('yellow') && (nameLower.includes('wiping') || nameLower.includes('cloth'))) {
+      unitWeight = 0.11;
+    } else if (nameLower.includes('white') && (nameLower.includes('wiping') || nameLower.includes('cloth'))) {
+      unitWeight = 0.135;
+    } else if (nameLower.includes('wiping') || (nameLower.includes('cloth') && !nameLower.includes('table'))) {
+      unitWeight = 0.11;
+    } else if (nameLower.includes('white') && nameLower.includes('chef')) {
+      unitWeight = 0.32;
+    } else if (nameLower.includes('black') && nameLower.includes('chef')) {
+      unitWeight = 0.5;
+    } else if (nameLower.includes('chef') || nameLower.includes('coat')) {
+      unitWeight = 0.32;
+    } else if (nameLower.includes('beanie') || nameLower.includes('cap')) {
+      unitWeight = 0.05;
+    } else if (nameLower.includes('apron')) {
+      unitWeight = 0.15;
+    } else if (nameLower.includes('napkin')) {
+      unitWeight = 0.05;
+    } else if (nameLower.includes('pant') || nameLower.includes('trouser')) {
+      unitWeight = 0.4;
+    } else if (nameLower.includes('t-shirt') || nameLower.includes('tshirt')) {
+      unitWeight = 0.2;
+    } else if (nameLower.includes('blazer')) {
+      unitWeight = 0.8;
+    } else if (nameLower.includes('pillow')) {
       unitWeight = 0.175;
     } else if (nameLower.includes('towel')) {
       unitWeight = 0.72;
@@ -594,9 +645,8 @@ export function calculateBatchWeight(items) {
       unitWeight = 0.47;
     } else if (nameLower.includes('double bedsheet') || nameLower.includes('double bed sheet')) {
       unitWeight = 0.87;
-    } else if (LINEN_ITEM_WEIGHTS[it.name]) {
-      unitWeight = LINEN_ITEM_WEIGHTS[it.name];
     }
+
     totalWeight += qty * unitWeight;
   }
   return round1(totalWeight);
