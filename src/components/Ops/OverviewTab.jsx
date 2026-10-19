@@ -1,14 +1,15 @@
 import React, { useState } from 'react';
-import { Building2, Users, Package, Shirt, BadgeCheck, ChevronDown, ChevronUp, ArrowRight, AlertTriangle } from 'lucide-react';
+import { Building2, Users, Package, Shirt, BadgeCheck, ChevronDown, ChevronUp, ArrowRight, AlertTriangle, IndianRupee } from 'lucide-react';
 import { SERVICE_GROUPS } from '../../lib/orders';
 import { fmtKg, fmtDay, Tile, StatusBadge } from './shared';
 
 const SERVICE_TONE = { wash_iron: 'blue', wash_fold: 'green', dry_clean: 'purple', iron: 'amber', other: 'gray' };
 
-function SectionTotals({ kg, clothes, verified, total, unit }) {
+function SectionTotals({ kg, clothes, verified, total, unit, revenue }) {
   const left = total - verified;
   return (
-    <div className="overview-widgets-grid ops-grid-3">
+    <div className="overview-widgets-grid ops-grid-4">
+      <Tile tone="green" icon={<IndianRupee size={16} />} label="Total Revenue" value={`₹${(revenue || 0).toLocaleString('en-IN')}`} />
       <Tile tone="blue" icon={<Package size={16} />} label="KG processed" value={fmtKg(kg)} />
       <Tile tone="purple" icon={<Shirt size={16} />} label="Clothes processed" value={clothes} />
       <Tile tone={left ? 'amber' : 'green'} icon={<BadgeCheck size={16} />} label={`${unit} verified`}
@@ -66,12 +67,12 @@ export default function OverviewTab({ b2c, b2bSum, onGo }) {
     <div className="ops-overview">
       <section>
         <SectionHead icon={<Building2 size={18} />} title="B2B Overview" label="Verify B2B" onOpen={() => onGo('b2b')} />
-        <SectionTotals kg={b2bSum.kg} clothes={b2bSum.clothes} verified={b2bSum.verified} total={b2bSum.entries} unit="Entries" />
+        <SectionTotals kg={b2bSum.kg} clothes={b2bSum.clothes} verified={b2bSum.verified} total={b2bSum.entries} unit="Entries" revenue={b2bSum.totalRevenue} />
       </section>
 
       <section>
         <SectionHead icon={<Users size={18} />} title="B2C Overview" label="Verify B2C" onOpen={() => onGo('b2c')} />
-        <SectionTotals kg={b2c.kg} clothes={b2c.clothes} verified={b2c.verified} total={b2c.orders} unit="Orders" />
+        <SectionTotals kg={b2c.kg} clothes={b2c.clothes} verified={b2c.verified} total={b2c.orders} unit="Orders" revenue={b2c.totalRevenue} />
         
         {b2c.delayed > 0 && (
           <div className="delayed-banner" style={{ marginTop: 14, cursor: 'pointer' }} onClick={() => onGo('b2c')}>

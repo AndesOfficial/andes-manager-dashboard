@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Plus, Trash2, Loader2, Info, Camera, Image as ImageIcon, X } from 'lucide-react';
 import { addB2bEntry, updateB2bEntry, fetchStoreB2bReference, uploadB2bPhoto } from '../../firebase';
-import { num, round1 } from '../../lib/orders';
+import { num, round1, calculateB2bBatchRevenue, isHostel99Client, getDaysInMonth, HOSTEL_99_MONTHLY_REVENUE } from '../../lib/orders';
 import {
   fmtKg, fmtDay, todayStr, EmptyState, Sheet, StatusBadge, RowActions, ReasonSheet, HistoryList,
   STATUS_FILTERS, matchesFilter,
@@ -362,31 +362,59 @@ function PhotoModal({ url, title, onClose }) {
   );
 }
 
-function EntryRow({ entry, onEdit, onCancel, onZoomPhoto }) {
+function EntryRow({ entry, countOnDate = 1, onEdit, onCancel, onZoomPhoto }) {
   const [busy, setBusy] = useState(false);
   const run = async (action) => {
     setBusy(true);
     try { await updateB2bEntry(entry.id, action); } catch (err) { alert(err.message); }
     setBusy(false);
   };
+
+  const isH99 = isHostel99Client(entry.client);
+  const isOne8 = String(entry.client || '').toLowerCase().includes('one 8') || String(entry.client || '').toLowerCase().includes('one8');
+  const isZolo = String(entry.client || '').toLowerCase().includes('zolo');
+  const daysInMonth = getDaysInMonth(entry.date);
+  const revenue = calculateB2bBatchRevenue(entry, countOnDate);
+
   return (
     <div className={`card ops-row ops-st-${entry.status}`}>
       <div className="card-top">
         <div>
-          <div className="card-name">{entry.client}</div>
+          <div className="card-name" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span>{entry.client}</span>
+            {isH99 && (
+              <span className="badge badge-purple" style={{ fontSize: 10, padding: '1px 6px' }}>Hostel 99</span>
+            )}
+          </div>
           <div className="ops-muted">
             {fmtDay(entry.date)} · Batch {entry.batchNo}
             {entry.students > 0 && ` · ${entry.students} students`}
             {entry.note && ` · ${entry.note}`}
           </div>
         </div>
-        <div className="ops-row-kg">{fmtKg(entry.kg)}<div className="ops-muted">{entry.clothes} clothes</div></div>
+        <div className="ops-row-kg">
+          <div style={{ color: '#059669', fontWeight: 800, fontSize: 16 }}>
+            ₹{revenue.toLocaleString('en-IN', { minimumFractionDigits: Number.isInteger(revenue) ? 0 : 2, maximumFractionDigits: 2 })}
+          </div>
+          <div className="ops-muted">{fmtKg(entry.kg)} · {entry.clothes} pcs</div>
+        </div>
       </div>
       {entry.items?.length > 0 && (
         <div className="svc-items">{entry.items.map((it) => `${it.name} × ${it.qty}`).join(', ')}</div>
       )}
       <div className="card-badges">
         <StatusBadge status={entry.status} locked={!!entry.adminLockedAt} />
+        {isH99 && (
+          <span className="badge badge-purple" title="Hostel 99 ₹28,000 monthly contract breakdown">
+            ₹28k/mo: ₹{Math.round(HOSTEL_99_MONTHLY_REVENUE / daysInMonth)}/day {countOnDate > 1 ? `(÷ ${countOnDate} batches = ₹${revenue})` : '(1 batch)'}
+          </span>
+        )}
+        {isOne8 && (
+          <span className="badge badge-amber">One 8 Rates</span>
+        )}
+        {isZolo && (
+          <span className="badge badge-blue">Zolo Rates</span>
+        )}
         {entry.students > 0 && <span className="badge badge-purple">{entry.students} students</span>}
         {entry.photoUrl && (
           <button
@@ -453,11 +481,76 @@ export default function B2BTab({ range, entries, clients, adding, onAddClose }) 
     ...entries.map((e) => e.client),
   ])).filter(Boolean).sort(), [clients, entries]);
 
+  const h99CountsByDate = useMemo(() => {
+    const counts = {};
+    entries.forEach((e) => {
+      if (isHostel99Client(e.client) && e.status !== 'cancelled') {
+        const d = e.date || 'unknown';
+        counts[d] = (counts[d] || 0) + 1;
+      }
+    });
+    return counts;
+  }, [entries]);
+
   const counts = useMemo(() => Object.fromEntries(STATUS_FILTERS.map((f) => [f.id, entries.filter((e) => matchesFilter(e.status, f.id)).length])), [entries]);
   const list = entries.filter((e) => matchesFilter(e.status, filter));
 
+  const summary = useMemo(() => {
+    const live = list.filter((e) => e.status !== 'cancelled');
+    let totalKg = 0;
+    let totalClothes = 0;
+    let nonH99Revenue = 0;
+    const h99Dates = new Set();
+
+    live.forEach((e) => {
+      totalKg += num(e.kg);
+      totalClothes += num(e.clothes);
+      if (isHostel99Client(e.client)) {
+        if (e.date) h99Dates.add(e.date);
+      } else {
+        nonH99Revenue += calculateB2bBatchRevenue(e);
+      }
+    });
+
+    const hostel99Revenue = Array.from(h99Dates).reduce((sum, d) => sum + (HOSTEL_99_MONTHLY_REVENUE / getDaysInMonth(d)), 0);
+    const totalRevenue = Math.round(nonH99Revenue + hostel99Revenue);
+
+    return {
+      totalRevenue,
+      hostel99Revenue: Math.round(hostel99Revenue),
+      kg: round1(totalKg),
+      clothes: totalClothes,
+      verified: live.filter((e) => e.status === 'verified').length,
+      entries: live.length,
+    };
+  }, [list]);
+
   return (
     <div>
+      {/* Top B2B KPI Summary Strip */}
+      <div className="b2c-metrics-grid" style={{ marginBottom: 16, gridTemplateColumns: 'repeat(4, 1fr)', background: '#ffffff' }}>
+        <div className="b2c-metric-cell">
+          <span className="b2c-metric-val b2c-price-highlight">
+            ₹{summary.totalRevenue.toLocaleString('en-IN')}
+          </span>
+          <span className="b2c-metric-lbl">
+            {summary.hostel99Revenue > 0 ? `B2B Rev (inc. ₹${summary.hostel99Revenue.toLocaleString('en-IN')} H99)` : 'B2B Revenue'}
+          </span>
+        </div>
+        <div className="b2c-metric-cell">
+          <span className="b2c-metric-val">{fmtKg(summary.kg)}</span>
+          <span className="b2c-metric-lbl">Total Weight</span>
+        </div>
+        <div className="b2c-metric-cell">
+          <span className="b2c-metric-val">{summary.clothes} pcs</span>
+          <span className="b2c-metric-lbl">Total Clothes</span>
+        </div>
+        <div className="b2c-metric-cell">
+          <span className="b2c-metric-val">{summary.verified} / {summary.entries}</span>
+          <span className="b2c-metric-lbl">Verified Batches</span>
+        </div>
+      </div>
+
       <div className="chip-row scroll">
         {STATUS_FILTERS.map((f) => (
           <button key={f.id} className={`chip ${filter === f.id ? 'chip-active' : ''}`} onClick={() => setFilter(f.id)}>{f.label} ({counts[f.id]})</button>
@@ -473,6 +566,7 @@ export default function B2BTab({ range, entries, clients, adding, onAddClose }) 
             <EntryRow
               key={e.id}
               entry={e}
+              countOnDate={isHostel99Client(e.client) ? (h99CountsByDate[e.date] || 1) : 1}
               onEdit={setEditing}
               onCancel={setCancelling}
               onZoomPhoto={(url, title) => setZoomPhoto({ url, title })}

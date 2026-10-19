@@ -513,6 +513,145 @@ export function calculateB2cPrice(order, lines, pricesCatalog = {}) {
   };
 }
 
+export const HOSTEL_99_MONTHLY_REVENUE = 28000;
+
+export const ONE8_RATE_MAP = {
+  'Wiping Cloth': 9,
+  'Chef Coat': 13,
+  'T-Shirt': 13,
+  'Pant': 13,
+  'Apron': 9,
+  'Napkin': 6,
+  'Blazer': 200,
+  'Cap': 5,
+};
+
+export const ZOLO_RATE_MAP = {
+  'Towel': 12,
+  'Bath towel': 12,
+  'Bath Towel': 12,
+  'Single Bedsheet': 13,
+  'Single Bed Sheet': 13,
+  'Double Bedsheet': 15,
+  'Double Bed Sheet': 15,
+  'Pillow Cover': 10,
+  'Single Duvet Cover': 30,
+  'Double Duvet Cover': 35,
+  'King Duvet Cover': 35,
+  'Duvet Cover': 35,
+  'Blanket': 110,
+  'Curtain': 75,
+  'Door mat': 49,
+};
+
+export const ITEM_RATE_MAP = {
+  'Single Bedsheet': 30,
+  'Double Bedsheet': 45,
+  'Duvet Cover': 30,
+  'Pillow Cover': 10,
+  'Bath towel': 20,
+  'Blanket': 110,
+  'Curtain': 75,
+  'Door mat': 49,
+  ...ONE8_RATE_MAP,
+  ...ZOLO_RATE_MAP,
+};
+
+export function isHostel99Client(clientName) {
+  const c = String(clientName || '').trim().toLowerCase();
+  return c.includes('hostel 99') || c.includes('hostel99') || c.startsWith('99');
+}
+
+export function getDaysInMonth(dateStr) {
+  if (!dateStr || typeof dateStr !== 'string') {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  }
+  const dStr = dateStr.split('T')[0];
+  const parts = dStr.split(/[-/]/);
+  if (parts.length >= 2) {
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10);
+    if (!isNaN(year) && !isNaN(month) && month >= 1 && month <= 12) {
+      return new Date(year, month, 0).getDate();
+    }
+  }
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+}
+
+export function calculateB2bBatchRevenue(entry, countOnDate = 1) {
+  const clientLower = String(entry.client || '').toLowerCase();
+
+  // Hostel 99 orders have a combined fixed monthly revenue of ₹28,000 across all properties.
+  // For each order daily, divide 28,000 by (number of days in month * count of batches on that day).
+  if (isHostel99Client(clientLower)) {
+    const daysInMonth = getDaysInMonth(entry.date);
+    const dailyTotal = HOSTEL_99_MONTHLY_REVENUE / daysInMonth;
+    const safeCount = Math.max(1, countOnDate || 1);
+    return parseFloat((dailyTotal / safeCount).toFixed(2));
+  }
+
+  const isOne8 = clientLower.includes('one 8') || clientLower.includes('one8');
+  const isZolo = clientLower.includes('zolo');
+
+  let total = 0;
+  let hasItemRevenue = false;
+
+  const items = entry.items || entry.itemsList;
+  if (Array.isArray(items) && items.length > 0) {
+    items.forEach((it) => {
+      const qty = Number(it.qty ?? it.quantity) || 0;
+      if (qty <= 0) return;
+      const nameLower = String(it.name || '').trim().toLowerCase();
+      let rate = 0;
+      if (isOne8) {
+        rate = ONE8_RATE_MAP[it.name] ||
+          (nameLower.includes('wiping') ? 9 :
+           nameLower.includes('chef') ? 13 :
+           nameLower.includes('t-shirt') || nameLower.includes('tshirt') ? 13 :
+           nameLower.includes('pant') || nameLower.includes('trouser') ? 13 :
+           nameLower.includes('apron') ? 9 :
+           nameLower.includes('napkin') ? 6 :
+           nameLower.includes('blazer') ? 200 :
+           nameLower.includes('cap') ? 5 : 0);
+      } else if (isZolo) {
+        rate = ZOLO_RATE_MAP[it.name] ||
+          (nameLower.includes('pillow') ? 10 :
+           nameLower.includes('towel') ? 12 :
+           nameLower.includes('single bedsheet') || nameLower.includes('single bed sheet') ? 13 :
+           nameLower.includes('double bedsheet') || nameLower.includes('double bed sheet') ? 15 :
+           nameLower.includes('single duvet') ? 30 :
+           nameLower.includes('double duvet') || nameLower.includes('king duvet') ? 35 :
+           (ITEM_RATE_MAP[it.name] || 0));
+      } else {
+        rate = ITEM_RATE_MAP[it.name] ||
+          (nameLower.includes('bedsheet') ? 30 :
+           nameLower.includes('towel') ? 20 :
+           nameLower.includes('blanket') ? 110 :
+           nameLower.includes('cover') ? 25 : 15);
+      }
+
+      if (rate > 0) {
+        total += qty * rate;
+        hasItemRevenue = true;
+      }
+    });
+  }
+
+  if (!hasItemRevenue && Number(entry.calculatedRevenue) > 0) {
+    return Number(entry.calculatedRevenue);
+  }
+
+  const weight = Number(entry.kg ?? entry.weight) || 0;
+  if (!hasItemRevenue && weight > 0) {
+    const kgRate = 35;
+    total = weight * kgRate;
+  }
+
+  return Math.round(total);
+}
+
 /** Totals for live (non-cancelled) rows plus per-group breakdown. */
 export function b2cTotals(rows) {
   const live = rows.filter((r) => r.status !== 'cancelled');
@@ -524,12 +663,18 @@ export function b2cTotals(rows) {
     g.kg += num(l.kg);
     g.clothes += num(l.qty);
   }));
+
+  const totalRevenue = Math.round(
+    live.reduce((s, r) => s + (r.payment?.amount || num(r.order?.totalCost ?? r.order?.payableAmount ?? r.order?.totalAmount ?? r.order?.amount ?? 0)), 0)
+  );
+
   return {
     orders: live.length,
     delayed: delayed.length,
     kg: round1(live.reduce((s, r) => s + r.kg, 0)),
     clothes: live.reduce((s, r) => s + r.clothes, 0),
     verified: live.filter((r) => r.status === 'verified').length,
+    totalRevenue,
     groups: Object.fromEntries(Object.entries(groups).map(([id, g]) => [id, { orders: g.orders.size, kg: round1(g.kg), clothes: g.clothes, rows: g.rows }])),
   };
 }
@@ -543,11 +688,37 @@ export function b2bTotals(entries) {
     const itemKg = (e.items || []).reduce((is, it) => is + (num(it.qty) * getEstimatedItemWeight(it.name)), 0);
     return s + itemKg;
   }, 0);
+
+  // Group Hostel 99 batches by date
+  const h99CountsByDate = {};
+  live.forEach((e) => {
+    if (isHostel99Client(e.client)) {
+      const d = e.date || 'unknown';
+      h99CountsByDate[d] = (h99CountsByDate[d] || 0) + 1;
+    }
+  });
+
+  let nonH99Revenue = 0;
+  const h99Dates = new Set();
+  live.forEach((e) => {
+    if (isHostel99Client(e.client)) {
+      if (e.date) h99Dates.add(e.date);
+    } else {
+      nonH99Revenue += calculateB2bBatchRevenue(e);
+    }
+  });
+
+  // Calculate Hostel 99 contract share
+  const hostel99Revenue = Array.from(h99Dates).reduce((sum, d) => sum + (HOSTEL_99_MONTHLY_REVENUE / getDaysInMonth(d)), 0);
+  const totalRevenue = Math.round(nonH99Revenue + hostel99Revenue);
+
   return {
     entries: live.length,
     kg: round1(totalKg),
     clothes: live.reduce((s, e) => s + num(e.clothes), 0),
     verified: live.filter((e) => e.status === 'verified').length,
+    totalRevenue,
+    hostel99Revenue: Math.round(hostel99Revenue),
   };
 }
 
