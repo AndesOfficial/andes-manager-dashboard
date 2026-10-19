@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   AlertCircle, Plus, Camera, Image as ImageIcon, Trash2, CheckCircle2,
-  Clock, AlertTriangle, Building2, Users, ExternalLink, X, Loader2, MessageSquare
+  Clock, AlertTriangle, Building2, Users, ExternalLink, X, Loader2, MessageSquare, Edit2
 } from 'lucide-react';
 import {
-  subscribeManagerIssues, addManagerIssue, updateManagerIssue, uploadIssuePhoto
+  subscribeManagerIssues, addManagerIssue, updateManagerIssue, deleteManagerIssue, uploadIssuePhoto
 } from '../../firebase';
-import { Sheet, Tile, EmptyState } from '../Ops/shared';
+import { Sheet, Tile, EmptyState, ConfirmDeleteSheet } from '../Ops/shared';
 
 const B2B_ISSUE_TYPES = [
   'Missing Clothes',
@@ -39,7 +39,7 @@ export default function IssuesTab({ clients = [] }) {
   const [reporting, setReporting] = useState(false);
   const [viewingPhoto, setViewingPhoto] = useState(null);
 
-  // Form State
+  // Form State (New Issue)
   const [scope, setScope] = useState('b2b');
   const [clientName, setClientName] = useState(clients[0] || '');
   const [customClient, setCustomClient] = useState('');
@@ -53,6 +53,24 @@ export default function IssuesTab({ clients = [] }) {
   const [photoPreview, setPhotoPreview] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+
+  // Edit Issue State
+  const [editingIssue, setEditingIssue] = useState(null);
+  const [editScope, setEditScope] = useState('b2b');
+  const [editClientName, setEditClientName] = useState('');
+  const [editCustomClient, setEditCustomClient] = useState('');
+  const [editB2cCustomer, setEditB2cCustomer] = useState('');
+  const [editB2cOrderNo, setEditB2cOrderNo] = useState('');
+  const [editIssueType, setEditIssueType] = useState('Missing Clothes');
+  const [editSeverity, setEditSeverity] = useState('normal');
+  const [editStatus, setEditStatus] = useState('pending');
+  const [editDescription, setEditDescription] = useState('');
+  const [editPhotoFile, setEditPhotoFile] = useState(null);
+  const [editPhotoPreview, setEditPhotoPreview] = useState('');
+  const [editExistingPhotoUrl, setEditExistingPhotoUrl] = useState('');
+
+  // Delete Confirm State
+  const [deleteConfirmIssue, setDeleteConfirmIssue] = useState(null);
 
   // Subscribe to live issues
   useEffect(() => {
@@ -165,6 +183,118 @@ export default function IssuesTab({ clients = [] }) {
       console.error('Failed to update issue status:', err);
       alert('Could not update status: ' + err.message);
     }
+  };
+
+  // Open Edit Modal
+  const openEditModal = (issue) => {
+    setEditingIssue(issue);
+    setEditScope(issue.scope || 'b2b');
+
+    if (issue.scope === 'b2b') {
+      const isKnownClient = clients.includes(issue.linkedEntity);
+      if (isKnownClient) {
+        setEditClientName(issue.linkedEntity);
+        setEditCustomClient('');
+      } else {
+        setEditClientName('other');
+        setEditCustomClient(issue.linkedEntity || '');
+      }
+      setEditB2cCustomer('');
+      setEditB2cOrderNo('');
+    } else {
+      setEditClientName(clients[0] || '');
+      setEditCustomClient('');
+      const match = (issue.linkedEntity || '').match(/^(.*?)\s*\(Order #([^)]+)\)$/);
+      if (match) {
+        setEditB2cCustomer(match[1]);
+        setEditB2cOrderNo(match[2]);
+      } else {
+        setEditB2cCustomer(issue.linkedEntity || '');
+        setEditB2cOrderNo('');
+      }
+    }
+
+    setEditIssueType(issue.issueType || (issue.scope === 'b2b' ? B2B_ISSUE_TYPES[0] : B2C_ISSUE_TYPES[0]));
+    setEditSeverity(issue.severity || 'normal');
+    setEditStatus(issue.status || 'pending');
+    setEditDescription(issue.description || '');
+    const currentPhoto = issue.photoUrl || (issue.photoUrls && issue.photoUrls[0]) || '';
+    setEditExistingPhotoUrl(currentPhoto);
+    setEditPhotoPreview(currentPhoto);
+    setEditPhotoFile(null);
+    setError('');
+  };
+
+  // Handle Photo Select in Edit Mode
+  const handleEditPhotoSelect = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setError('Please choose a valid image file (PNG, JPG, WebP).');
+      return;
+    }
+    setEditPhotoFile(file);
+    setEditPhotoPreview(URL.createObjectURL(file));
+    setError('');
+  };
+
+  const removeEditPhoto = () => {
+    setEditPhotoFile(null);
+    setEditPhotoPreview('');
+    setEditExistingPhotoUrl('');
+  };
+
+  // Submit Update Issue
+  const handleUpdateIssue = async (e) => {
+    e.preventDefault();
+    setError('');
+
+    const linked = editScope === 'b2b'
+      ? (editClientName === 'other' ? editCustomClient.trim() : editClientName).trim()
+      : editB2cCustomer.trim() + (editB2cOrderNo.trim() ? ` (Order #${editB2cOrderNo.trim()})` : '');
+
+    if (editScope === 'b2b' && !linked) {
+      setError('Please select or specify the B2B Client/Hostel name.');
+      return;
+    }
+    if (editScope === 'b2c' && !editB2cCustomer.trim()) {
+      setError('Please provide Customer Name or Order ID for the B2C issue.');
+      return;
+    }
+    if (!editDescription.trim()) {
+      setError('Please describe the issue faced.');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      let photoUrl = editExistingPhotoUrl;
+      if (editPhotoFile) {
+        const uploadRes = await uploadIssuePhoto(editPhotoFile);
+        photoUrl = uploadRes.url;
+      } else if (!editPhotoPreview) {
+        photoUrl = '';
+      }
+
+      await updateManagerIssue(editingIssue.id, {
+        scope: editScope,
+        linkedEntity: linked,
+        issueType: editIssueType,
+        severity: editSeverity,
+        status: editStatus,
+        resolveStatus: editStatus === 'resolved' ? 'Resolved' : 'Unresolved',
+        title: `${editIssueType} - ${linked}`,
+        description: editDescription.trim(),
+        photoUrl,
+        photoUrls: photoUrl ? [photoUrl] : [],
+      });
+
+      setEditingIssue(null);
+    } catch (err) {
+      console.error('Failed to update issue:', err);
+      setError(err.message || 'Failed to update issue. Please try again.');
+    }
+    setSubmitting(false);
   };
 
   // Metrics
@@ -364,7 +494,48 @@ export default function IssuesTab({ clients = [] }) {
                 )}
 
                 {/* Footer Action */}
-                <div style={{ marginTop: 'auto', paddingTop: 8, borderTop: '1px solid #f1f5f9', display: 'flex', justifyContent: 'flex-end' }}>
+                <div style={{ marginTop: 'auto', paddingTop: 10, borderTop: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <button
+                      type="button"
+                      className="btn-ghost"
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: '#2563eb',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 5,
+                        padding: '4px 8px',
+                        borderRadius: 6,
+                        background: '#eff6ff',
+                        border: '1px solid #bfdbfe',
+                        cursor: 'pointer',
+                      }}
+                      onClick={() => openEditModal(item)}
+                    >
+                      <Edit2 size={13} /> Edit
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-ghost"
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: '#dc2626',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 5,
+                        padding: '4px 8px',
+                        borderRadius: 6,
+                        cursor: 'pointer',
+                      }}
+                      onClick={() => setDeleteConfirmIssue(item)}
+                    >
+                      <Trash2 size={13} /> Delete
+                    </button>
+                  </div>
+
                   <button
                     type="button"
                     className="btn-ghost"
@@ -375,6 +546,7 @@ export default function IssuesTab({ clients = [] }) {
                       display: 'inline-flex',
                       alignItems: 'center',
                       gap: 6,
+                      cursor: 'pointer',
                     }}
                     onClick={() => handleToggleResolve(item)}
                   >
@@ -582,7 +754,238 @@ export default function IssuesTab({ clients = [] }) {
         </Sheet>
       )}
 
-      {/* 5. FULL PHOTO VIEWER LIGHTBOX */}
+      {/* 5. EDIT ISSUE MODAL / SHEET */}
+      {editingIssue && (
+        <Sheet title="Edit Operations Issue" onClose={() => setEditingIssue(null)}>
+          <form onSubmit={handleUpdateIssue} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {/* Scope Selection */}
+            <div className="form-row">
+              <label className="form-label">Issue Scope</label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <button
+                  type="button"
+                  style={{
+                    padding: '10px 14px',
+                    borderRadius: 10,
+                    border: editScope === 'b2b' ? '2px solid #2563eb' : '1px solid #cbd5e1',
+                    background: editScope === 'b2b' ? '#eff6ff' : '#fff',
+                    color: editScope === 'b2b' ? '#1d4ed8' : '#475569',
+                    fontWeight: 700,
+                    fontSize: 13,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                    cursor: 'pointer',
+                  }}
+                  onClick={() => {
+                    setEditScope('b2b');
+                    setEditIssueType(B2B_ISSUE_TYPES[0]);
+                  }}
+                >
+                  <Building2 size={16} /> B2B Client / Hostel
+                </button>
+                <button
+                  type="button"
+                  style={{
+                    padding: '10px 14px',
+                    borderRadius: 10,
+                    border: editScope === 'b2c' ? '2px solid #7e22ce' : '1px solid #cbd5e1',
+                    background: editScope === 'b2c' ? '#faf5ff' : '#fff',
+                    color: editScope === 'b2c' ? '#7e22ce' : '#475569',
+                    fontWeight: 700,
+                    fontSize: 13,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                    cursor: 'pointer',
+                  }}
+                  onClick={() => {
+                    setEditScope('b2c');
+                    setEditIssueType(B2C_ISSUE_TYPES[0]);
+                  }}
+                >
+                  <Users size={16} /> B2C Retail Order
+                </button>
+              </div>
+            </div>
+
+            {/* Linked Entity: B2B vs B2C */}
+            {editScope === 'b2b' ? (
+              <div className="form-row">
+                <label className="form-label">Select Client / Property</label>
+                <select
+                  className="form-input"
+                  value={editClientName}
+                  onChange={(e) => setEditClientName(e.target.value)}
+                >
+                  {clients.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                  <option value="other">Other / Custom Client</option>
+                </select>
+                {editClientName === 'other' && (
+                  <input
+                    className="form-input"
+                    style={{ marginTop: 8 }}
+                    placeholder="Enter custom B2B client or hostel name"
+                    value={editCustomClient}
+                    onChange={(e) => setEditCustomClient(e.target.value)}
+                  />
+                )}
+              </div>
+            ) : (
+              <div className="form-row two-col">
+                <div>
+                  <label className="form-label">Customer Name / Phone</label>
+                  <input
+                    className="form-input"
+                    placeholder="e.g. Rahul Sharma (9876543210)"
+                    value={editB2cCustomer}
+                    onChange={(e) => setEditB2cCustomer(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="form-label">Order ID (optional)</label>
+                  <input
+                    className="form-input"
+                    placeholder="e.g. 10452"
+                    value={editB2cOrderNo}
+                    onChange={(e) => setEditB2cOrderNo(e.target.value)}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Issue Category & Severity */}
+            <div className="form-row two-col">
+              <div>
+                <label className="form-label">Issue Category</label>
+                <select
+                  className="form-input"
+                  value={editIssueType}
+                  onChange={(e) => setEditIssueType(e.target.value)}
+                >
+                  {(editScope === 'b2b' ? B2B_ISSUE_TYPES : B2C_ISSUE_TYPES).map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="form-label">Severity Level</label>
+                <select
+                  className="form-input"
+                  value={editSeverity}
+                  onChange={(e) => setEditSeverity(e.target.value)}
+                >
+                  <option value="normal">Normal</option>
+                  <option value="high">High</option>
+                  <option value="critical">Critical (Immediate Attention)</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Status Selection */}
+            <div className="form-row">
+              <label className="form-label">Status</label>
+              <select
+                className="form-input"
+                value={editStatus}
+                onChange={(e) => setEditStatus(e.target.value)}
+              >
+                <option value="pending">Pending</option>
+                <option value="checking">Checking</option>
+                <option value="resolved">Resolved</option>
+              </select>
+            </div>
+
+            {/* Description */}
+            <div className="form-row">
+              <label className="form-label">Details / Description</label>
+              <textarea
+                className="form-input"
+                rows={3}
+                placeholder="Explain the issue clearly..."
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+              />
+            </div>
+
+            {/* Photo Attachment */}
+            <div className="form-row">
+              <label className="form-label">Proof Photo</label>
+              {editPhotoPreview ? (
+                <div className="b2b-photo-preview-wrap">
+                  <img src={editPhotoPreview} alt="Proof preview" className="b2b-photo-thumb" />
+                  <div className="b2b-photo-actions" style={{ display: 'flex', gap: 8 }}>
+                    <label className="btn-ghost" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      <Camera size={14} /> Camera
+                      <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handleEditPhotoSelect} />
+                    </label>
+                    <label className="btn-ghost" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      <ImageIcon size={14} /> Gallery
+                      <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleEditPhotoSelect} />
+                    </label>
+                    <button type="button" className="btn-ghost" style={{ color: 'var(--red)', display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={removeEditPhoto}>
+                      <Trash2 size={14} /> Remove Photo
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="b2b-photo-dropzone" style={{ padding: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                    <Camera size={20} className="ops-muted" />
+                    <span style={{ color: '#cbd5e1' }}>|</span>
+                    <ImageIcon size={20} className="ops-muted" />
+                  </div>
+                  <span className="ops-muted" style={{ fontSize: 12 }}>Snap photo or choose from gallery</span>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                    <label className="btn-secondary" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '6px 12px', borderRadius: 8, background: '#f1f5f9', border: '1px solid #cbd5e1', fontWeight: 600 }}>
+                      <Camera size={14} /> Take Photo
+                      <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handleEditPhotoSelect} />
+                    </label>
+                    <label className="btn-secondary" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '6px 12px', borderRadius: 8, background: '#f1f5f9', border: '1px solid #cbd5e1', fontWeight: 600 }}>
+                      <ImageIcon size={14} /> Gallery
+                      <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleEditPhotoSelect} />
+                    </label>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {error && <div className="form-error">{error}</div>}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 10 }}>
+              <button type="button" className="btn-secondary" onClick={() => setEditingIssue(null)}>
+                Cancel
+              </button>
+              <button type="submit" className="btn-primary" disabled={submitting}>
+                {submitting ? <><Loader2 size={16} className="spin" /> Saving…</> : 'Save Changes'}
+              </button>
+            </div>
+          </form>
+        </Sheet>
+      )}
+
+      {/* 6. DELETE CONFIRMATION SHEET */}
+      {deleteConfirmIssue && (
+        <ConfirmDeleteSheet
+          title="Delete Issue"
+          message={`Are you sure you want to permanently delete this issue for "${deleteConfirmIssue.linkedEntity || 'this entry'}"? This action cannot be undone.`}
+          onConfirm={async () => {
+            try {
+              await deleteManagerIssue(deleteConfirmIssue.id);
+              setDeleteConfirmIssue(null);
+            } catch (err) {
+              alert('Could not delete issue: ' + err.message);
+            }
+          }}
+          onClose={() => setDeleteConfirmIssue(null)}
+        />
+      )}
+
+      {/* 7. FULL PHOTO VIEWER LIGHTBOX */}
       {viewingPhoto && (
         <div
           className="modal-backdrop"

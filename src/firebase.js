@@ -602,6 +602,12 @@ export async function updateManagerIssue(id, patch = {}) {
   }, { merge: true });
 }
 
+/** Delete a manager issue */
+export async function deleteManagerIssue(id) {
+  const ref = doc(managerIssuesCol, id);
+  await deleteDoc(ref);
+}
+
 /** Upload issue proof photo to Firebase Storage */
 export async function uploadIssuePhoto(file) {
   return uploadB2bPhoto(file, 'manager_issue_photos');
