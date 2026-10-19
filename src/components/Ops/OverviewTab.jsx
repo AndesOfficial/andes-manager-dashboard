@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Building2, Users, Package, Shirt, BadgeCheck, ChevronDown, ChevronUp, ArrowRight } from 'lucide-react';
+import { Building2, Users, Package, Shirt, BadgeCheck, ChevronDown, ChevronUp, ArrowRight, AlertTriangle } from 'lucide-react';
 import { SERVICE_GROUPS } from '../../lib/orders';
 import { fmtKg, fmtDay, Tile, StatusBadge } from './shared';
 
@@ -72,6 +72,22 @@ export default function OverviewTab({ b2c, b2bSum, onGo }) {
       <section>
         <SectionHead icon={<Users size={18} />} title="B2C Overview" label="Verify B2C" onOpen={() => onGo('b2c')} />
         <SectionTotals kg={b2c.kg} clothes={b2c.clothes} verified={b2c.verified} total={b2c.orders} unit="Orders" />
+        
+        {b2c.delayed > 0 && (
+          <div className="delayed-banner" style={{ marginTop: 14, cursor: 'pointer' }} onClick={() => onGo('b2c')}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <AlertTriangle size={20} />
+              <div>
+                <div className="delayed-banner-title">{b2c.delayed} Active B2C Order{b2c.delayed === 1 ? '' : 's'} Delayed</div>
+                <div className="delayed-banner-sub">Orders from earlier dates that have not been delivered yet. Tap to view and take action.</div>
+              </div>
+            </div>
+            <button type="button" className="btn-ghost btn-ghost-red" style={{ background: '#fff', fontSize: 13 }}>
+              View Delayed <ArrowRight size={14} />
+            </button>
+          </div>
+        )}
+
         <div className="ops-subhead">By service</div>
         <div className="overview-widgets-grid ops-grid-4">
           {SERVICE_GROUPS.filter((g) => g.id !== 'other' || b2c.groups.other.orders > 0).map((g) => (

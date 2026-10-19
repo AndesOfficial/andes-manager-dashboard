@@ -34,11 +34,27 @@ export default function useRangeData({ from, to }, enabled) {
     return () => unsubs.forEach((u) => u());
   }, [from, to, enabled]);
 
-  const b2cRows = useMemo(() => (orders && verifications
-    ? orders.map((o) => buildB2cRow(o, verifications[o.id], categories))
-      .filter((r) => r.pickupDay >= from && r.pickupDay <= to)
-      .sort((a, b) => b.pickupDay.localeCompare(a.pickupDay) || a.customer.localeCompare(b.customer))
-    : []), [orders, verifications, categories, from, to]);
+  const b2cRows = useMemo(() => {
+    if (!orders || !verifications) return [];
+    return orders
+      .map((o) => buildB2cRow(o, verifications[o.id], categories))
+      .filter((r) => {
+        // 1. Orders within the selected pickup date range
+        if (r.pickupDay >= from && r.pickupDay <= to) return true;
+        // 2. Orders with dropDay in the range
+        if (r.dropDay && r.dropDay >= from && r.dropDay <= to) return true;
+        // 3. Active old orders that are not delivered yet (delayed)
+        if (r.isDelayed) return true;
+        return false;
+      })
+      .sort((a, b) => {
+        if (a.isDelayed !== b.isDelayed) return a.isDelayed ? -1 : 1;
+        if (a.isDelayed && b.isDelayed && a.delayedDays !== b.delayedDays) {
+          return b.delayedDays - a.delayedDays;
+        }
+        return b.pickupDay.localeCompare(a.pickupDay) || a.customer.localeCompare(b.customer);
+      });
+  }, [orders, verifications, categories, from, to]);
 
   const b2c = useMemo(() => b2cTotals(b2cRows), [b2cRows]);
   const b2bSum = useMemo(() => b2bTotals(b2b || []), [b2b]);

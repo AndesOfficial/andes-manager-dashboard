@@ -106,12 +106,22 @@ export function StatusBadge({ status, locked }) {
 export const STATUS_FILTERS = [
   { id: 'all', label: 'All' },
   { id: 'todo', label: 'To verify' },
+  { id: 'delayed', label: 'Delayed' },
   { id: 'verified', label: 'Verified' },
   { id: 'cancelled', label: 'Cancelled' },
 ];
-export const matchesFilter = (status, filter) => filter === 'all'
-  || (filter === 'todo' && (status === 'pending' || status === 'changed'))
-  || status === filter;
+export const matchesFilter = (rowOrStatus, filter) => {
+  if (filter === 'all') return true;
+  if (rowOrStatus && typeof rowOrStatus === 'object') {
+    if (filter === 'delayed') return !!rowOrStatus.isDelayed;
+    const status = rowOrStatus.status;
+    if (filter === 'todo') return status === 'pending' || status === 'changed';
+    return status === filter;
+  }
+  const status = rowOrStatus;
+  if (filter === 'todo') return status === 'pending' || status === 'changed';
+  return status === filter;
+};
 
 /** Verify / Edit / Cancel (or Restore) buttons shared by B2B and B2C rows. */
 export function RowActions({ status, locked, busy, onVerify, onEdit, onCancel, onRestore, isB2b = false }) {

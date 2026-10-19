@@ -158,6 +158,41 @@ export function pickupDay(o) {
   return '';
 }
 
+/** Expected drop/delivery day of a rider order in 'YYYY-MM-DD' IST format. */
+export function getDropDay(o) {
+  if (!o) return '';
+  // 1. Explicit dropDate
+  if (o.dropDate) {
+    const dd = String(o.dropDate).trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(dd)) return dd.slice(0, 10);
+    const dmy = dd.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+    if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+    const d = toDate(o.dropDate);
+    if (d) return istDay(d);
+  }
+
+  // 2. dropTime / deliveryTime / dropSlot
+  const dt = o.dropTime || o.deliveryTime || o.dropSlot;
+  const dtDate = toDate(dt);
+  if (dtDate) return istDay(dtDate);
+  if (typeof dt === 'string') {
+    const trimmed = dt.trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) return trimmed.slice(0, 10);
+    const dmy = trimmed.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+    if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+    const m = trimmed.match(/\b(\d{1,2})\s+([A-Za-z]{3})/);
+    const created = toDate(o.createdAt) || toDate(o.orderTimestamp) || toDate(o.updatedAt);
+    if (m && MONTHS[m[2].toLowerCase()] !== undefined) {
+      let year = created ? created.getFullYear() : new Date().getFullYear();
+      const month = MONTHS[m[2].toLowerCase()];
+      if (created && month < created.getMonth() - 6) year += 1;
+      return `${year}-${String(month + 1).padStart(2, '0')}-${String(m[1]).padStart(2, '0')}`;
+    }
+  }
+
+  return '';
+}
+
 /** Rider-recorded order weight, newest field first. */
 /** Assumed average weights (in kg) for bedsheets and per-piece items. Easily editable. */
 export const ITEM_AVERAGE_WEIGHTS = {
@@ -271,11 +306,77 @@ export const sumQty = (lines) => lines.reduce((s, l) => s + num(l.qty), 0);
 
 export const isCancelledOrder = (o) => /cancel/i.test(String(o.status || ''));
 
+export const DELIVERED_STATUSES = new Set([
+  'completed',
+  'delivered',
+  'delivered_at_next_door',
+  'cancelled',
+  'canceled',
+  'archived',
+]);
+
+export function isOrderDelivered(status) {
+  const s = String(status || '').toLowerCase().trim();
+  return DELIVERED_STATUSES.has(s);
+}
+
+/**
+ * Calculates how many days an active order is delayed past its scheduled date.
+ * Returns 0 if already delivered/completed or not yet overdue.
+ */
+export function getOrderDelay(order, referenceDay = istDay(new Date())) {
+  if (!order || isOrderDelivered(order.status)) return 0;
+
+  const drop = getDropDay(order);
+  const pickup = pickupDay(order);
+  const targetDay = drop || pickup;
+  if (!targetDay) return 0;
+
+  if (targetDay >= referenceDay) return 0;
+
+  const targetMs = new Date(`${targetDay}T12:00:00+05:30`).getTime();
+  const refMs = new Date(`${referenceDay}T12:00:00+05:30`).getTime();
+  const diffDays = Math.round((refMs - targetMs) / 86400000);
+  return diffDays > 0 ? diffDays : 0;
+}
+
+/** Normalizes payment info from cartdetails + manager overrides */
+export function getPaymentInfo(order, verification) {
+  const vPay = verification?.payment;
+
+  const rawStatus = String(vPay?.status || order?.paymentStatus || (order?.paymentDoneOnDelivery ? 'completed' : '') || 'pending').toLowerCase().trim();
+  const rawMethod = String(vPay?.method || order?.paymentMethodOnDelivery || order?.paymentMethod || order?.payment_method || 'cod').toLowerCase().trim();
+  const amount = num(vPay?.amount !== undefined ? vPay.amount : (order?.totalCost !== undefined ? order.totalCost : order?.totalAmount));
+
+  const isPaid = rawStatus === 'paid' || rawStatus === 'completed' || rawStatus === 'success' || rawStatus === 'captured' || order?.paymentDoneOnDelivery === true;
+  const status = isPaid ? 'paid' : (rawStatus === 'failed' ? 'failed' : 'unpaid');
+
+  let methodLabel = 'Cash on Delivery';
+  if (rawMethod === 'upi') methodLabel = 'UPI';
+  else if (rawMethod.includes('online') || rawMethod.includes('razorpay')) methodLabel = 'Online';
+  else if (rawMethod.includes('card')) methodLabel = 'Card';
+  else if (rawMethod.includes('wallet')) methodLabel = 'Wallet';
+  else if (rawMethod === 'cod' || rawMethod.includes('cash')) methodLabel = 'Cash (COD)';
+  else if (rawMethod) methodLabel = rawMethod.toUpperCase();
+
+  return {
+    status, // 'paid' | 'unpaid' | 'failed'
+    rawStatus,
+    method: rawMethod,
+    methodLabel,
+    amount,
+    isPaid,
+    notes: vPay?.notes || '',
+    updatedAt: vPay?.updatedAt || order?.paymentUpdatedAt || order?.paymentRecordedAt || null,
+    updatedBy: vPay?.updatedBy || order?.paymentUpdatedBy || order?.paymentRecordedBy || null,
+  };
+}
+
 /**
  * Joins a rider order with its manager verification doc.
  * status: pending | verified | changed (rider edited after verify) | cancelled
  */
-export function buildB2cRow(order, verification, categories) {
+export function buildB2cRow(order, verification, categories, referenceDay = istDay(new Date())) {
   const rider = riderLines(order, categories);
   const v = verification || {};
   const sig = linesSig(rider);
@@ -283,11 +384,23 @@ export function buildB2cRow(order, verification, categories) {
   if (status === 'verified' && v.riderSig && v.riderSig !== sig) status = 'changed';
   const lines = Array.isArray(v.lines) && status !== 'changed' ? v.lines : rider;
   const leadSource = getOrderLeadSource(order);
+  const pickup = pickupDay(order);
+  const drop = getDropDay(order);
+  const delayedDays = getOrderDelay(order, referenceDay);
+  const isDelayed = delayedDays > 0;
+  const isDelivered = isOrderDelivered(order.status);
+  const payment = getPaymentInfo(order, verification);
+
   return {
     id: order.id,
     order,
     leadSource,
-    pickupDay: pickupDay(order),
+    pickupDay: pickup,
+    dropDay: drop,
+    delayedDays,
+    isDelayed,
+    isDelivered,
+    payment,
     customer: String(order.customerName || order.userName || order.name || 'Customer').trim(),
     phone: String(order.userMobile || order.customerNumber || order.phoneNumber || ''),
     orderStatus: String(order.status || ''),
@@ -306,6 +419,7 @@ export function buildB2cRow(order, verification, categories) {
 /** Totals for live (non-cancelled) rows plus per-group breakdown. */
 export function b2cTotals(rows) {
   const live = rows.filter((r) => r.status !== 'cancelled');
+  const delayed = rows.filter((r) => r.isDelayed);
   const groups = Object.fromEntries(SERVICE_GROUPS.map((g) => [g.id, { orders: new Set(), kg: 0, clothes: 0, rows: [] }]));
   live.forEach((r) => r.lines.forEach((l) => {
     const g = groups[l.group] || groups.other;
@@ -315,6 +429,7 @@ export function b2cTotals(rows) {
   }));
   return {
     orders: live.length,
+    delayed: delayed.length,
     kg: round1(live.reduce((s, r) => s + r.kg, 0)),
     clothes: live.reduce((s, r) => s + r.clothes, 0),
     verified: live.filter((r) => r.status === 'verified').length,

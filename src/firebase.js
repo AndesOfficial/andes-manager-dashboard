@@ -136,9 +136,9 @@ const historyEntry = (action, reason = '', changes = []) => ({
 /* ---- B2C: rider orders (`cartdetails`) ---- */
 
 // Pickup day lives in different fields per app version (see pickupDay()), so
-// load by createdAt — every order has it — looking back up to 45 days before
-// the range to capture advance bookings, with a 2-day buffer ahead of `to`.
-export const PICKUP_LOOKBACK_DAYS = 45;
+// load by createdAt — every order has it — looking back up to 60 days before
+// the range to capture advance bookings and active delayed orders, with a 2-day buffer ahead of `to`.
+export const PICKUP_LOOKBACK_DAYS = 60;
 
 export function subscribeB2cOrders(from, to, callback, onError) {
   const q = query(collection(db, 'cartdetails'),
@@ -150,7 +150,8 @@ export function subscribeB2cOrders(from, to, callback, onError) {
 const verCol = collection(db, 'managerVerifications');
 
 export function subscribeVerifications(from, to, callback, onError) {
-  return onSnapshot(query(verCol, where('pickupDate', '>=', from), where('pickupDate', '<=', to)), (snap) => {
+  const lookbackDay = dayAfter(from, -PICKUP_LOOKBACK_DAYS).toISOString().slice(0, 10);
+  return onSnapshot(query(verCol, where('pickupDate', '>=', lookbackDay), where('pickupDate', '<=', to)), (snap) => {
     callback(Object.fromEntries(snap.docs.map((d) => [d.id, d.data()])));
   }, onError);
 }
@@ -181,6 +182,59 @@ export async function saveB2cVerification(row, action, { lines, reason = '', cha
       updatedAt: serverTimestamp(),
       updatedBy: actor(),
       ...(status === 'verified' ? { verifiedAt: serverTimestamp(), verifiedBy: actor() } : {}),
+    }, { merge: true });
+  });
+}
+
+/**
+ * Manager updates payment status, method, and amount on a B2C order.
+ * Updates `cartdetails` and records audit history in `managerVerifications`.
+ */
+export async function updateB2cPayment(orderId, { status, method, amount, notes = '' }) {
+  const isPaid = status === 'paid';
+  const cartRef = doc(db, 'cartdetails', orderId);
+  const verRef = doc(verCol, orderId);
+
+  await runTransaction(db, async (tx) => {
+    const cartSnap = await tx.get(cartRef);
+    if (!cartSnap.exists()) {
+      throw new Error(`Order ${orderId} does not exist in cartdetails.`);
+    }
+    const verSnap = await tx.get(verRef);
+    const verCur = verSnap.exists() ? verSnap.data() : {};
+
+    const cartPatch = {
+      paymentStatus: isPaid ? 'completed' : status,
+      paymentMethod: method,
+      paymentMethodOnDelivery: method,
+      paymentDoneOnDelivery: isPaid,
+      paymentUpdatedAt: serverTimestamp(),
+      paymentUpdatedBy: actor(),
+    };
+    if (amount !== undefined && !isNaN(Number(amount))) {
+      cartPatch.totalCost = Number(amount);
+      cartPatch.totalAmount = Number(amount);
+    }
+    tx.update(cartRef, cartPatch);
+
+    tx.set(verRef, {
+      ...verCur,
+      source: 'b2c',
+      orderId,
+      payment: {
+        status,
+        method,
+        amount: Number(amount) || 0,
+        notes: notes.trim(),
+        updatedAt: new Date().toISOString(),
+        updatedBy: actor(),
+      },
+      history: [
+        ...(verCur.history || []),
+        historyEntry('update_payment', notes.trim() || `Payment updated to ${status} (${method})`),
+      ],
+      updatedAt: serverTimestamp(),
+      updatedBy: actor(),
     }, { merge: true });
   });
 }
