@@ -5,11 +5,13 @@ import { fmtKg, fmtDay, Tile, StatusBadge } from './shared';
 
 const SERVICE_TONE = { wash_iron: 'blue', wash_fold: 'green', dry_clean: 'purple', iron: 'amber', other: 'gray' };
 
-function SectionTotals({ kg, clothes, verified, total, unit, revenue }) {
+function SectionTotals({ kg, clothes, verified, total, unit, revenue, showRevenue = true }) {
   const left = total - verified;
   return (
-    <div className="overview-widgets-grid ops-grid-4">
-      <Tile tone="green" icon={<IndianRupee size={16} />} label="Total Revenue" value={`₹${(revenue || 0).toLocaleString('en-IN')}`} />
+    <div className={`overview-widgets-grid ${showRevenue ? 'ops-grid-4' : 'ops-grid-3'}`}>
+      {showRevenue && (
+        <Tile tone="green" icon={<IndianRupee size={16} />} label="Total Revenue" value={`₹${(revenue || 0).toLocaleString('en-IN')}`} />
+      )}
       <Tile tone="blue" icon={<Package size={16} />} label="KG processed" value={fmtKg(kg)} />
       <Tile tone="purple" icon={<Shirt size={16} />} label="Clothes processed" value={clothes} />
       <Tile tone={left ? 'amber' : 'green'} icon={<BadgeCheck size={16} />} label={`${unit} verified`}
@@ -67,7 +69,7 @@ export default function OverviewTab({ b2c, b2bSum, onGo }) {
     <div className="ops-overview">
       <section>
         <SectionHead icon={<Building2 size={18} />} title="B2B Overview" label="Verify B2B" onOpen={() => onGo('b2b')} />
-        <SectionTotals kg={b2bSum.kg} clothes={b2bSum.clothes} verified={b2bSum.verified} total={b2bSum.entries} unit="Entries" revenue={b2bSum.totalRevenue} />
+        <SectionTotals kg={b2bSum.kg} clothes={b2bSum.clothes} verified={b2bSum.verified} total={b2bSum.entries} unit="Entries" showRevenue={false} />
       </section>
 
       <section>

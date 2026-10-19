@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Plus, Trash2, Loader2, Info, Camera, Image as ImageIcon, X } from 'lucide-react';
 import { addB2bEntry, updateB2bEntry, fetchStoreB2bReference, uploadB2bPhoto } from '../../firebase';
-import { num, round1, calculateB2bBatchRevenue, isHostel99Client, getDaysInMonth, HOSTEL_99_MONTHLY_REVENUE } from '../../lib/orders';
+import { num, round1, calculateB2bBatchRevenue, calculateBatchWeight, isHostel99Client, getDaysInMonth, HOSTEL_99_MONTHLY_REVENUE } from '../../lib/orders';
 import {
   fmtKg, fmtDay, todayStr, EmptyState, Sheet, StatusBadge, RowActions, ReasonSheet, HistoryList,
   STATUS_FILTERS, matchesFilter,
@@ -73,7 +73,21 @@ function EntrySheet({ entry, defaultDate, clients, onClose }) {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
-  const setItem = (i, k, v) => set('items', form.items.map((it, j) => (j === i ? { ...it, [k]: v } : it)));
+
+  const updateItems = (newItems) => {
+    const isLinenOrH99 = isHostel99Client(form.client) || String(form.client || '').toLowerCase().includes('zolo');
+    const autoWeight = calculateBatchWeight(newItems);
+    setForm((f) => ({
+      ...f,
+      items: newItems,
+      kg: (isLinenOrH99 && autoWeight > 0) ? autoWeight : (autoWeight > 0 && (!f.kg || f.kg === '0' || f.kg === '') ? autoWeight : f.kg),
+    }));
+  };
+
+  const setItem = (i, k, v) => {
+    const updated = form.items.map((it, j) => (j === i ? { ...it, [k]: v } : it));
+    updateItems(updated);
+  };
 
   const clientCatalogue = useMemo(() => getClientCatalogue(form.client), [form.client]);
 
@@ -100,11 +114,13 @@ function EntrySheet({ entry, defaultDate, clients, onClose }) {
 
   const addFromCatalogue = (itemName) => {
     const existingIndex = form.items.findIndex((it) => it.name.toLowerCase() === itemName.toLowerCase());
+    let updated;
     if (existingIndex >= 0) {
-      setItem(existingIndex, 'qty', num(form.items[existingIndex].qty) + 1);
+      updated = form.items.map((it, idx) => idx === existingIndex ? { ...it, qty: num(it.qty) + 1 } : it);
     } else {
-      set('items', [...form.items, { name: itemName, qty: 1 }]);
+      updated = [...form.items, { name: itemName, qty: 1 }];
     }
+    updateItems(updated);
   };
 
   const prefillCatalogue = () => {
@@ -115,7 +131,7 @@ function EntrySheet({ entry, defaultDate, clients, onClose }) {
         newItems.push({ name, qty: '' });
       }
     });
-    set('items', newItems);
+    updateItems(newItems);
   };
 
   const submit = async (e) => {
@@ -309,7 +325,7 @@ function EntrySheet({ entry, defaultDate, clients, onClose }) {
               <button
                 type="button"
                 className="icon-btn"
-                onClick={() => set('items', form.items.filter((_, j) => j !== i))}
+                onClick={() => updateItems(form.items.filter((_, j) => j !== i))}
               >
                 <Trash2 size={15} />
               </button>
@@ -373,8 +389,6 @@ function EntryRow({ entry, countOnDate = 1, onEdit, onCancel, onZoomPhoto }) {
   const isH99 = isHostel99Client(entry.client);
   const isOne8 = String(entry.client || '').toLowerCase().includes('one 8') || String(entry.client || '').toLowerCase().includes('one8');
   const isZolo = String(entry.client || '').toLowerCase().includes('zolo');
-  const daysInMonth = getDaysInMonth(entry.date);
-  const revenue = calculateB2bBatchRevenue(entry, countOnDate);
 
   return (
     <div className={`card ops-row ops-st-${entry.status}`}>
@@ -393,10 +407,10 @@ function EntryRow({ entry, countOnDate = 1, onEdit, onCancel, onZoomPhoto }) {
           </div>
         </div>
         <div className="ops-row-kg">
-          <div style={{ color: '#059669', fontWeight: 800, fontSize: 16 }}>
-            ₹{revenue.toLocaleString('en-IN', { minimumFractionDigits: Number.isInteger(revenue) ? 0 : 2, maximumFractionDigits: 2 })}
+          <div style={{ color: '#0f172a', fontWeight: 800, fontSize: 16 }}>
+            {fmtKg(entry.kg)}
           </div>
-          <div className="ops-muted">{fmtKg(entry.kg)} · {entry.clothes} pcs</div>
+          <div className="ops-muted">{entry.clothes} pcs</div>
         </div>
       </div>
       {entry.items?.length > 0 && (
@@ -404,17 +418,6 @@ function EntryRow({ entry, countOnDate = 1, onEdit, onCancel, onZoomPhoto }) {
       )}
       <div className="card-badges">
         <StatusBadge status={entry.status} locked={!!entry.adminLockedAt} />
-        {isH99 && (
-          <span className="badge badge-purple" title="Hostel 99 ₹28,000 monthly contract breakdown">
-            ₹28k/mo: ₹{Math.round(HOSTEL_99_MONTHLY_REVENUE / daysInMonth)}/day {countOnDate > 1 ? `(÷ ${countOnDate} batches = ₹${revenue})` : '(1 batch)'}
-          </span>
-        )}
-        {isOne8 && (
-          <span className="badge badge-amber">One 8 Rates</span>
-        )}
-        {isZolo && (
-          <span className="badge badge-blue">Zolo Rates</span>
-        )}
         {entry.students > 0 && <span className="badge badge-purple">{entry.students} students</span>}
         {entry.photoUrl && (
           <button
@@ -499,27 +502,18 @@ export default function B2BTab({ range, entries, clients, adding, onAddClose }) 
     const live = list.filter((e) => e.status !== 'cancelled');
     let totalKg = 0;
     let totalClothes = 0;
-    let nonH99Revenue = 0;
-    const h99Dates = new Set();
+    let totalStudents = 0;
 
     live.forEach((e) => {
       totalKg += num(e.kg);
       totalClothes += num(e.clothes);
-      if (isHostel99Client(e.client)) {
-        if (e.date) h99Dates.add(e.date);
-      } else {
-        nonH99Revenue += calculateB2bBatchRevenue(e);
-      }
+      totalStudents += num(e.students);
     });
 
-    const hostel99Revenue = Array.from(h99Dates).reduce((sum, d) => sum + (HOSTEL_99_MONTHLY_REVENUE / getDaysInMonth(d)), 0);
-    const totalRevenue = Math.round(nonH99Revenue + hostel99Revenue);
-
     return {
-      totalRevenue,
-      hostel99Revenue: Math.round(hostel99Revenue),
       kg: round1(totalKg),
       clothes: totalClothes,
+      students: totalStudents,
       verified: live.filter((e) => e.status === 'verified').length,
       entries: live.length,
     };
@@ -527,15 +521,11 @@ export default function B2BTab({ range, entries, clients, adding, onAddClose }) 
 
   return (
     <div>
-      {/* Top B2B KPI Summary Strip */}
+      {/* Top B2B KPI Summary Strip (Operations Only) */}
       <div className="b2c-metrics-grid" style={{ marginBottom: 16, gridTemplateColumns: 'repeat(4, 1fr)', background: '#ffffff' }}>
         <div className="b2c-metric-cell">
-          <span className="b2c-metric-val b2c-price-highlight">
-            ₹{summary.totalRevenue.toLocaleString('en-IN')}
-          </span>
-          <span className="b2c-metric-lbl">
-            {summary.hostel99Revenue > 0 ? `B2B Rev (inc. ₹${summary.hostel99Revenue.toLocaleString('en-IN')} H99)` : 'B2B Revenue'}
-          </span>
+          <span className="b2c-metric-val">{summary.entries}</span>
+          <span className="b2c-metric-lbl">Total Batches</span>
         </div>
         <div className="b2c-metric-cell">
           <span className="b2c-metric-val">{fmtKg(summary.kg)}</span>

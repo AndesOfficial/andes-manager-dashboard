@@ -360,8 +360,8 @@ export async function updateB2bEntry(id, action, { patch = {}, reason = '', chan
     if (!snap.exists()) throw new Error('This entry no longer exists.');
     const cur = snap.data();
     if (cur.adminLockedAt) throw new Error('Admin has already counted this entry. Ask Admin for an adjustment.');
-    if (cur.status === 'verified' && (action === 'edit' || action === 'cancel')) {
-      throw new Error('This B2B entry is already verified and cannot be edited or cancelled.');
+    if (cur.status === 'verified' && action === 'cancel') {
+      throw new Error('This B2B entry is already verified and cannot be cancelled. Ask Admin if cancellation is needed.');
     }
     const status = action === 'cancel' ? 'cancelled' : action === 'verify' ? 'verified' : 'pending';
     tx.update(ref, {

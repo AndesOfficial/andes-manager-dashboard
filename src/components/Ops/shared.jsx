@@ -149,10 +149,6 @@ export function RowActions({ status, locked, busy, onVerify, onEdit, onCancel, o
       </div>
     );
   }
-  // In B2B, manager is not allowed to edit or cancel after verification
-  if (isB2b && status === 'verified') {
-    return null;
-  }
   return (
     <div className="row-actions">
       {status !== 'verified' && (
@@ -161,7 +157,9 @@ export function RowActions({ status, locked, busy, onVerify, onEdit, onCancel, o
         </button>
       )}
       <button className="btn-ghost" disabled={busy} onClick={onEdit}><Pencil size={14} /> Edit</button>
-      <button className="btn-ghost btn-ghost-red" disabled={busy} onClick={onCancel}><Ban size={14} /> Cancel</button>
+      {(!isB2b || status !== 'verified') && (
+        <button className="btn-ghost btn-ghost-red" disabled={busy} onClick={onCancel}><Ban size={14} /> Cancel</button>
+      )}
     </div>
   );
 }

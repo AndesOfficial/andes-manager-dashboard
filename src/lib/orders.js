@@ -557,6 +557,51 @@ export const ITEM_RATE_MAP = {
   ...ZOLO_RATE_MAP,
 };
 
+export const LINEN_ITEM_WEIGHTS = {
+  'Single Bedsheet': 0.47,
+  'Single Bed Sheet': 0.47,
+  'Double Bedsheet': 0.87,
+  'Double Bed Sheet': 0.87,
+  'Single Duvet Cover': 0.92,
+  'Duvet Cover Single': 0.92,
+  'Double Duvet Cover': 1.5,
+  'Duvet Cover Double': 1.5,
+  'King Duvet Cover': 1.5,
+  'Duvet Cover': 1.5,
+  'Pillow Cover': 0.175,
+  'Towel': 0.72,
+  'Bath towel': 0.72,
+  'Bath Towel': 0.72,
+};
+
+export function calculateBatchWeight(items) {
+  if (!Array.isArray(items) || !items.length) return 0;
+  let totalWeight = 0;
+  for (const it of items) {
+    const qty = num(it.qty ?? it.quantity);
+    if (qty <= 0) continue;
+    const nameLower = String(it.name || '').trim().toLowerCase();
+    let unitWeight = 0;
+    if (nameLower.includes('pillow')) {
+      unitWeight = 0.175;
+    } else if (nameLower.includes('towel')) {
+      unitWeight = 0.72;
+    } else if (nameLower.includes('single duvet') || nameLower.includes('duvet cover single')) {
+      unitWeight = 0.92;
+    } else if (nameLower.includes('double duvet') || nameLower.includes('king duvet') || nameLower.includes('duvet cover')) {
+      unitWeight = 1.5;
+    } else if (nameLower.includes('single bedsheet') || nameLower.includes('single bed sheet')) {
+      unitWeight = 0.47;
+    } else if (nameLower.includes('double bedsheet') || nameLower.includes('double bed sheet')) {
+      unitWeight = 0.87;
+    } else if (LINEN_ITEM_WEIGHTS[it.name]) {
+      unitWeight = LINEN_ITEM_WEIGHTS[it.name];
+    }
+    totalWeight += qty * unitWeight;
+  }
+  return round1(totalWeight);
+}
+
 export function isHostel99Client(clientName) {
   const c = String(clientName || '').trim().toLowerCase();
   return c.includes('hostel 99') || c.includes('hostel99') || c.startsWith('99');
