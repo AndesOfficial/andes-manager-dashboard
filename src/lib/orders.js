@@ -396,6 +396,26 @@ export function buildB2cRow(order, verification, categories, referenceDay = istD
   const isDelayed = delayedDays > 0;
   const isDelivered = isOrderDelivered(order.status);
   const payment = getPaymentInfo(order, verification);
+  const pickupRider =
+    order.pickupRiderName ||
+    order.riderName ||
+    (typeof order.rider === 'string' ? order.rider : order.rider?.name || order.rider?.riderName) ||
+    (typeof order.assignedTo === 'string' ? order.assignedTo : order.assignedTo?.name || order.assignedTo?.riderName) ||
+    order.deliveryBy ||
+    order.assignedRiderName ||
+    (order.riderId ? 'Assigned Rider' : null);
+  const riderName =
+    order.riderName ||
+    order.pickupRiderName ||
+    (typeof order.rider === 'string' ? order.rider : order.rider?.name || order.rider?.riderName) ||
+    order.assignedRiderName ||
+    null;
+  const riderPhone =
+    order.riderPhone ||
+    order.pickupRiderPhone ||
+    order.riderMobile ||
+    (typeof order.rider === 'object' ? order.rider?.phone || order.rider?.mobile : null) ||
+    null;
 
   return {
     id: order.id,
@@ -406,6 +426,9 @@ export function buildB2cRow(order, verification, categories, referenceDay = istD
     dropDay: drop,
     pickupSlot: order.pickupSlot || (typeof order.pickupTime === 'string' ? order.pickupTime : null),
     dropSlot: order.dropSlot || (typeof order.dropTime === 'string' ? order.dropTime : typeof order.deliveryTime === 'string' ? order.deliveryTime : null),
+    pickupRider,
+    riderName,
+    riderPhone,
     createdAt: order.createdAt || null,
     delayedDays,
     isDelayed,

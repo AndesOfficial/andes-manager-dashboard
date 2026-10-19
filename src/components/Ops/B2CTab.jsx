@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Search, Loader2, CreditCard, AlertTriangle, Pencil, CheckCircle2, X,
-  Copy, Check, Phone, Calendar, Clock, Sparkles
+  Copy, Check, Phone, Calendar, Clock, Sparkles, Bike
 } from 'lucide-react';
 import { saveB2cVerification, updateB2cPayment, fetchPricesCatalog } from '../../firebase';
 import { SERVICE_GROUPS, diffLines, num, round1, LEAD_SOURCE_TYPES, calculateB2cPrice } from '../../lib/orders';
@@ -312,6 +312,15 @@ function OrderRow({ row, highlight, isJustEdited, onEdit, onCancel, onEditPaymen
           <span>Drop: <strong>{row.dropDay ? fmtDay(row.dropDay) : 'Standard'}</strong></span>
           {row.dropSlot && <span className="ops-muted">({row.dropSlot})</span>}
         </span>
+        <span className="b2c-schedule-item" title="Rider who picked up this order">
+          <Bike size={13} style={{ color: '#7c3aed' }} />
+          <span>Rider: <strong style={{ color: '#1e293b' }}>{row.pickupRider || row.riderName || 'Not assigned'}</strong></span>
+          {row.riderPhone && (
+            <a href={`tel:${row.riderPhone}`} style={{ color: '#2563eb', marginLeft: 4 }} title={`Call rider (${row.riderPhone})`}>
+              📞
+            </a>
+          )}
+        </span>
       </div>
 
       {/* 4. Key Metrics Grid: Total Weight, Total Clothes, Total Amount */}
@@ -451,7 +460,7 @@ export default function B2CTab({ rows, focusId, range }) {
       }
 
       if (leadFilter !== 'all' && (r.leadSource || 'other') !== leadFilter) return false;
-      if (q && !r.customer.toLowerCase().includes(q) && !r.phone.includes(q) && !r.id.toLowerCase().includes(q)) return false;
+      if (q && !r.customer.toLowerCase().includes(q) && !r.phone.includes(q) && !r.id.toLowerCase().includes(q) && !(r.pickupRider && r.pickupRider.toLowerCase().includes(q))) return false;
       return true;
     });
   }, [rows, search, filter, leadFilter, range, lastEditedId]);
@@ -465,7 +474,7 @@ export default function B2CTab({ rows, focusId, range }) {
       <div className="toolbar">
         <div className="search-wrap">
           <Search size={16} className="search-icon" />
-          <input className="search-input" placeholder="Search name, phone or order ID" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <input className="search-input" placeholder="Search name, phone, order ID, or rider" value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
       </div>
 
