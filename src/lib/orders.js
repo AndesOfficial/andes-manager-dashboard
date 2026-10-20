@@ -340,10 +340,9 @@ export function riderLines(order, categories) {
   });
 }
 
-/** Stable fingerprint of rider values; a change after verification means re-verify. */
-export const linesSig = (lines) => lines.map((l) => `${l.name}|${round1(l.kg)}|${num(l.qty)}`).sort().join(';');
+export const linesSig = (lines) => lines.map((l) => `${l.name}|${Math.round(num(l.kg) * 100) / 100}|${num(l.qty)}`).sort().join(';');
 
-export const sumKg = (lines) => round1(lines.reduce((s, l) => s + num(l.kg), 0));
+export const sumKg = (lines) => Math.round(lines.reduce((s, l) => s + num(l.kg), 0) * 100) / 100;
 export const sumQty = (lines) => lines.reduce((s, l) => s + num(l.qty), 0);
 
 export const isCancelledOrder = (o) => /cancel/i.test(String(o.status || ''));
@@ -530,7 +529,7 @@ export function calculateB2cPrice(order, lines, pricesCatalog = {}) {
   const items = [];
 
   for (const l of lines) {
-    const isKg = l.group === 'wash_fold' || l.group === 'wash_iron';
+    const isKg = l.group === 'wash_fold' || l.group === 'wash_iron' || num(l.kg) > 0;
     if (isKg) {
       const wt = round1(l.kg);
       let rate = perKgRate;
@@ -834,11 +833,11 @@ export function b2cTotals(rows) {
   return {
     orders: live.length,
     delayed: delayed.length,
-    kg: round1(live.reduce((s, r) => s + r.kg, 0)),
+    kg: Math.round(live.reduce((s, r) => s + r.kg, 0) * 100) / 100,
     clothes: live.reduce((s, r) => s + r.clothes, 0),
     verified: live.filter((r) => r.status === 'verified').length,
     totalRevenue,
-    groups: Object.fromEntries(Object.entries(groups).map(([id, g]) => [id, { orders: g.orders.size, kg: round1(g.kg), clothes: g.clothes, rows: g.rows }])),
+    groups: Object.fromEntries(Object.entries(groups).map(([id, g]) => [id, { orders: g.orders.size, kg: Math.round(g.kg * 100) / 100, clothes: g.clothes, rows: g.rows }])),
   };
 }
 
@@ -892,7 +891,9 @@ export function diffLines(before, after) {
   const changes = [];
   after.forEach((l) => {
     const old = b.get(key(l)) || { kg: 0, qty: 0 };
-    if (round1(old.kg) !== round1(l.kg)) changes.push({ field: `${l.name} kg`, from: round1(old.kg), to: round1(l.kg) });
+    const oldKg = Math.round(num(old.kg) * 100) / 100;
+    const newKg = Math.round(num(l.kg) * 100) / 100;
+    if (oldKg !== newKg) changes.push({ field: `${l.name} kg`, from: oldKg, to: newKg });
     if (num(old.qty) !== num(l.qty)) changes.push({ field: `${l.name} clothes`, from: num(old.qty), to: num(l.qty) });
   });
   return changes;

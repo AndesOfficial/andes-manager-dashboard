@@ -162,24 +162,34 @@ function EntrySheet({ entry, defaultDate, clients, onClose, onDelete }) {
       setUploadingPhoto(false);
     }
 
+    const cleanKg = Math.round((Number(form.kg) || 0) * 100) / 100;
+    const cleanClothes = num(form.clothes) > 0 ? num(form.clothes) : (items.length ? itemTotal : 0);
     const clean = {
-      kg: round1(form.kg),
-      clothes: items.length ? itemTotal : num(form.clothes),
+      client: form.client.trim(),
+      date: form.date,
+      batchNo: String(form.batchNo || '1').trim(),
+      kg: cleanKg,
+      clothes: cleanClothes,
       students: num(form.students) || 0,
       photoUrl: photoUrl || '',
       items,
       note: form.note.trim(),
     };
+    const calculatedRevenue = calculateB2bBatchRevenue(clean);
+    clean.calculatedRevenue = calculatedRevenue;
+    clean.amount = calculatedRevenue;
 
     try {
       if (isEdit) {
         const changes = EDIT_FIELDS
           .filter(([k]) => String(entry[k] ?? '') !== String(clean[k]))
           .map(([k, label]) => ({ field: label, from: entry[k] ?? '', to: clean[k] }));
+        if (entry.client !== clean.client) changes.push({ field: 'Client', from: entry.client, to: clean.client });
+        if (entry.date !== clean.date) changes.push({ field: 'Date', from: entry.date, to: clean.date });
+        if (entry.batchNo !== clean.batchNo) changes.push({ field: 'Batch', from: entry.batchNo, to: clean.batchNo });
         if (JSON.stringify(entry.items || []) !== JSON.stringify(items)) changes.push({ field: 'Items', from: (entry.items || []).length, to: items.length });
-        if (!changes.length) throw new Error('Nothing changed.');
-        if (!reason.trim()) throw new Error('Write why you are changing this entry.');
-        await updateB2bEntry(entry.id, 'edit', { patch: clean, reason: reason.trim(), changes });
+
+        await updateB2bEntry(entry.id, 'edit', { patch: clean, reason: reason.trim() || 'Updated by manager', changes });
       } else {
         await addB2bEntry({ ...clean, client: form.client.trim(), batchNo: String(form.batchNo || '1').trim(), date: form.date });
       }
@@ -188,40 +198,35 @@ function EntrySheet({ entry, defaultDate, clients, onClose, onDelete }) {
   };
 
   return (
-    <Sheet title={isEdit ? `Correct ${entry.client}` : 'New B2B entry'} onClose={onClose}>
+    <Sheet title={isEdit ? `Edit ${entry.client}` : 'New B2B entry'} onClose={onClose}>
       <form onSubmit={submit}>
-        {isEdit ? (
-          <p className="ops-hint">{entry.client} · batch {entry.batchNo} · {fmtDay(entry.date)}. Editing sends it back to “To verify”. To change the client or date, cancel this entry and add a new one.</p>
-        ) : (
-          <>
-          <div className="form-row">
-            <label className="form-label">Date</label>
-            <input className="form-input" type="date" value={form.date} max={todayStr()} onChange={(e) => set('date', e.target.value)} />
-          </div>
-          <div className="form-row two-col">
-            <div>
-              <label className="form-label">Client</label>
-              <select className="form-input" value={form.client} onChange={(e) => set('client', e.target.value)}>
-                {clients.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="form-label">Batch / challan no.</label>
-              <input className="form-input" value={form.batchNo} onChange={(e) => set('batchNo', e.target.value)} placeholder="1" />
-            </div>
-          </div>
-          </>
-        )}
+        <div className="form-row">
+          <label className="form-label">Date</label>
+          <input className="form-input" type="date" value={form.date} max={todayStr()} onChange={(e) => set('date', e.target.value)} />
+        </div>
         <div className="form-row two-col">
           <div>
-            <label className="form-label">KG</label>
-            <input className="form-input" type="number" step="0.1" min="0" inputMode="decimal" value={form.kg} onChange={(e) => set('kg', e.target.value)} autoFocus={!isEdit} />
+            <label className="form-label">Client</label>
+            <select className="form-input" value={form.client} onChange={(e) => set('client', e.target.value)}>
+              {clients.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
           </div>
           <div>
-            <label className="form-label">Clothes</label>
+            <label className="form-label">Batch / challan no.</label>
+            <input className="form-input" value={form.batchNo} onChange={(e) => set('batchNo', e.target.value)} placeholder="1" />
+          </div>
+        </div>
+        <div className="form-row two-col">
+          <div>
+            <label className="form-label">KG (Weight)</label>
+            <input className="form-input" type="number" step="any" min="0" inputMode="decimal" value={form.kg} onChange={(e) => set('kg', e.target.value)} placeholder="0.00" autoFocus={!isEdit} />
+          </div>
+          <div>
+            <label className="form-label">Clothes Count</label>
             <input className="form-input" type="number" min="0" inputMode="numeric"
-              value={form.items.length ? itemTotal : form.clothes} disabled={form.items.length > 0}
-              onChange={(e) => set('clothes', e.target.value)} />
+              value={form.clothes}
+              onChange={(e) => set('clothes', e.target.value)} placeholder="0" />
+            {itemTotal > 0 && <span className="ops-muted" style={{ fontSize: 11, display: 'block', marginTop: 3 }}>Breakdown sum: {itemTotal} pcs</span>}
           </div>
         </div>
 
@@ -532,7 +537,7 @@ export default function B2BTab({ range, entries, clients, adding, onAddClose }) 
     });
 
     return {
-      kg: round1(totalKg),
+      kg: Math.round(totalKg * 100) / 100,
       clothes: totalClothes,
       students: totalStudents,
       verified: live.filter((e) => e.status === 'verified').length,

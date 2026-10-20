@@ -169,7 +169,6 @@ export const matchesFilter = (rowOrStatus, filter, keepRowId = null) => {
 
 /** Verify / Edit / Cancel (or Restore) / Delete buttons shared by B2B and B2C rows. */
 export function RowActions({ status, locked, busy, onVerify, onEdit, onCancel, onRestore, onDelete, isB2b = false }) {
-  if (locked) return null;
   if (status === 'cancelled') {
     return (
       <div className="row-actions">

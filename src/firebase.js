@@ -190,11 +190,10 @@ export async function saveB2cVerification(row, action, { lines, reason = '', cha
   await runTransaction(db, async (tx) => {
     const snap = await tx.get(ref);
     const cur = snap.exists() ? snap.data() : {};
-    if (cur.adminLockedAt) throw new Error('Admin has already counted this order. Ask Admin for an adjustment.');
 
     const status = action === 'cancel' ? 'cancelled' : action === 'restore' ? 'pending' : 'verified';
-    const activeLines = lines || cur.lines || row.rider;
-    const totalKg = Math.round(activeLines.reduce((s, l) => s + (Number(l.kg) || 0), 0) * 10) / 10;
+    const activeLines = lines || cur.lines || row.rider || [];
+    const totalKg = Math.round(activeLines.reduce((s, l) => s + (Number(l.kg) || 0), 0) * 100) / 100;
     const totalClothes = activeLines.reduce((s, l) => s + (Number(l.qty) || 0), 0);
 
     const verPayload = {
@@ -208,10 +207,10 @@ export async function saveB2cVerification(row, action, { lines, reason = '', cha
       lines: activeLines,
       kg: totalKg,
       clothes: totalClothes,
-      history: [...(cur.history || []), historyEntry(action, reason, changes)],
+      history: [...(cur.history || []), historyEntry(action, reason || 'Updated by manager', changes)],
       updatedAt: serverTimestamp(),
       updatedBy: actor(),
-      ...(status === 'verified' ? { verifiedAt: serverTimestamp(), verifiedBy: actor() } : {}),
+      ...(status === 'verified' ? { verifiedAt: cur.verifiedAt || serverTimestamp(), verifiedBy: cur.verifiedBy || actor() } : {}),
     };
 
     if (calculatedTotal !== null && !isNaN(Number(calculatedTotal)) && Number(calculatedTotal) > 0) {
@@ -225,8 +224,8 @@ export async function saveB2cVerification(row, action, { lines, reason = '', cha
 
     tx.set(ref, verPayload, { merge: true });
 
-    // When manager edits weights or lines, also update cartdetails
-    if (action === 'edit') {
+    // When manager edits or verifies weights/lines, sync to cartdetails
+    if (action === 'edit' || action === 'verify') {
       const cartSnap = await tx.get(cartRef);
       if (cartSnap.exists()) {
         const cartData = cartSnap.data();
@@ -234,7 +233,7 @@ export async function saveB2cVerification(row, action, { lines, reason = '', cha
         const updatedPerKg = { ...existingPerKg };
 
         activeLines.forEach((l) => {
-          if (l.group === 'wash_fold' || l.group === 'wash_iron') {
+          if (l.name) {
             updatedPerKg[l.name] = {
               ...(updatedPerKg[l.name] || {}),
               weight: Number(l.kg) || 0,
@@ -247,6 +246,7 @@ export async function saveB2cVerification(row, action, { lines, reason = '', cha
           clothesWeightKg: totalKg,
           internalWeightKg: totalKg,
           riderRecordedWeightKg: totalKg,
+          weight: totalKg,
           clothesCount: totalClothes,
           clothes: totalClothes,
           totalPieces: totalClothes,
@@ -259,6 +259,8 @@ export async function saveB2cVerification(row, action, { lines, reason = '', cha
         if (calculatedTotal !== null && !isNaN(Number(calculatedTotal)) && Number(calculatedTotal) > 0) {
           cartPatch.totalCost = Number(calculatedTotal);
           cartPatch.totalAmount = Number(calculatedTotal);
+          cartPatch.amount = Number(calculatedTotal);
+          cartPatch.finalAmount = Number(calculatedTotal);
         }
 
         tx.update(cartRef, cartPatch);
@@ -359,31 +361,44 @@ export async function updateB2bEntry(id, action, { patch = {}, reason = '', chan
     const snap = await tx.get(ref);
     if (!snap.exists()) throw new Error('This entry no longer exists.');
     const cur = snap.data();
-    if (cur.adminLockedAt) throw new Error('Admin has already counted this entry. Ask Admin for an adjustment.');
-    if (cur.status === 'verified' && action === 'cancel') {
-      throw new Error('This B2B entry is already verified and cannot be cancelled. Ask Admin if cancellation is needed.');
-    }
-    const status = action === 'cancel' ? 'cancelled' : action === 'verify' ? 'verified' : 'pending';
-    tx.update(ref, {
+
+    let status = cur.status || 'verified';
+    if (action === 'cancel') status = 'cancelled';
+    else if (action === 'verify') status = 'verified';
+    else if (action === 'restore') status = 'pending';
+    else if (patch.status) status = patch.status;
+
+    const newDate = patch.date || cur.date;
+    const newClient = patch.client || cur.client;
+    const newBatchNo = patch.batchNo !== undefined ? String(patch.batchNo).trim() : (cur.batchNo || '1');
+    const newId = `${newDate}__${slug(newClient)}__${slug(newBatchNo)}`;
+
+    const updatedData = {
+      ...cur,
       ...patch,
+      client: newClient,
+      date: newDate,
+      batchNo: newBatchNo,
       status,
-      history: [...(cur.history || []), historyEntry(action, reason, changes)],
+      history: [...(cur.history || []), historyEntry(action, reason || 'Updated by manager', changes)],
       updatedAt: serverTimestamp(),
       updatedBy: actor(),
-      ...(status === 'verified' ? { verifiedAt: serverTimestamp(), verifiedBy: actor() } : {}),
-    });
+      ...(status === 'verified' ? { verifiedAt: cur.verifiedAt || serverTimestamp(), verifiedBy: cur.verifiedBy || actor() } : {}),
+    };
+
+    if (newId !== id) {
+      const newRef = doc(b2bEntryCol, newId);
+      tx.set(newRef, updatedData);
+      tx.delete(ref);
+    } else {
+      tx.set(ref, updatedData, { merge: true });
+    }
   });
 }
 
 /** Permanently deletes a B2B entry. */
 export async function deleteB2bEntry(id) {
   const ref = doc(b2bEntryCol, id);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) return;
-  const cur = snap.data();
-  if (cur.adminLockedAt) {
-    throw new Error('Admin has already counted this entry. Ask Admin for an adjustment.');
-  }
   await deleteDoc(ref);
 }
 

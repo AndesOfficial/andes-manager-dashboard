@@ -122,7 +122,15 @@ function EditPaymentSheet({ row, onClose }) {
 }
 
 function EditSheet({ row, onClose, pricesCatalog = {}, onSaved }) {
-  const [lines, setLines] = useState(() => row.lines.map((l) => ({ ...l })));
+  const [lines, setLines] = useState(() => {
+    if (Array.isArray(row.lines) && row.lines.length > 0) {
+      return row.lines.map((l) => ({ ...l }));
+    }
+    const initialKg = Number(row.kg) || Number(row.order?.clothesWeightKg) || Number(row.order?.riderRecordedWeightKg) || 0;
+    const initialQty = Number(row.clothes) || Number(row.order?.clothesCount) || 1;
+    return [{ name: row.order?.service || 'Wash & Fold', group: 'wash_fold', kg: initialKg, qty: initialQty }];
+  });
+  const [customTotal, setCustomTotal] = useState('');
   const [reason, setReason] = useState('Re-weighed at store counter');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -133,19 +141,22 @@ function EditSheet({ row, onClose, pricesCatalog = {}, onSaved }) {
     return calculateB2cPrice(row.order, lines, pricesCatalog);
   }, [row.order, lines, pricesCatalog]);
 
+  const finalPrice = customTotal !== '' && !isNaN(Number(customTotal)) ? Number(customTotal) : priceInfo.total;
+
+  const totalKg = Math.round(lines.reduce((s, l) => s + (Number(l.kg) || 0), 0) * 100) / 100;
+  const totalClothes = lines.reduce((s, l) => s + (Number(l.qty) || 0), 0);
+
   const submit = async (e) => {
     e.preventDefault();
-    const clean = lines.map((l) => ({ ...l, kg: round1(l.kg), qty: num(l.qty) }));
-    const changes = diffLines(row.lines, clean);
-    if (!changes.length) { setError('Nothing changed. Use Verify if the rider values are correct.'); return; }
-    if (!reason.trim()) { setError('Write why you are correcting this.'); return; }
+    const clean = lines.map((l) => ({ ...l, kg: Math.round((Number(l.kg) || 0) * 100) / 100, qty: num(l.qty) }));
+    const changes = diffLines(row.lines || [], clean);
     setSaving(true);
     try {
       await saveB2cVerification(row, 'edit', {
         lines: clean,
-        reason: reason.trim(),
+        reason: reason.trim() || 'Re-weighed and verified at store counter',
         changes,
-        calculatedTotal: priceInfo.total,
+        calculatedTotal: finalPrice,
       });
       if (onSaved) onSaved(row.id);
       onClose();
@@ -153,30 +164,51 @@ function EditSheet({ row, onClose, pricesCatalog = {}, onSaved }) {
   };
 
   return (
-    <Sheet title={`Correct ${row.customer}`} onClose={onClose}>
+    <Sheet title={`Edit ${row.customer}`} onClose={onClose}>
       <form onSubmit={submit}>
         <p className="ops-hint">
-          Updating weight will recalculate the order price and save it to both the order bill and verification records.
+          Updating weight and clothes will automatically recalculate the order bill and update it across all dashboards.
         </p>
 
+        {/* Total Summary Strip */}
+        <div className="b2c-metrics-grid" style={{ marginBottom: 14, background: '#f8fafc', padding: 10, borderRadius: 10 }}>
+          <div className="b2c-metric-cell">
+            <span className="b2c-metric-val">{totalKg > 0 ? fmtKg(totalKg) : '0 kg'}</span>
+            <span className="b2c-metric-lbl">Total Weight</span>
+          </div>
+          <div className="b2c-metric-cell">
+            <span className="b2c-metric-val">{totalClothes} pcs</span>
+            <span className="b2c-metric-lbl">Total Clothes</span>
+          </div>
+          <div className="b2c-metric-cell">
+            <span className="b2c-metric-val b2c-price-highlight">₹{finalPrice}</span>
+            <span className="b2c-metric-lbl">New Price</span>
+          </div>
+        </div>
+
         {lines.map((l, i) => (
-          <div className="form-row two-col" key={l.name}>
+          <div className="form-row two-col" key={i}>
             <div>
-              <label className="form-label">{l.name} <span className="ops-muted">({groupLabel[l.group]})</span></label>
-              {isKgLine(l) ? (
-                <input className="form-input" type="number" step="0.1" min="0" inputMode="decimal"
-                  value={l.kg} onChange={(e) => set(i, 'kg', e.target.value)} placeholder="KG" />
-              ) : (
-                <span className="ops-muted" style={{ display: 'block', padding: '8px 0' }}>Per-piece service</span>
-              )}
+              <label className="form-label">{l.name} <span className="ops-muted">({groupLabel[l.group] || l.group})</span></label>
+              <input className="form-input" type="number" step="any" min="0" inputMode="decimal"
+                value={l.kg} onChange={(e) => set(i, 'kg', e.target.value)} placeholder="Weight in KG" />
             </div>
             <div>
-              <label className="form-label">Clothes Count</label>
+              <label className="form-label">Clothes Count (pcs)</label>
               <input className="form-input" type="number" min="0" inputMode="numeric"
-                value={l.qty} onChange={(e) => set(i, 'qty', e.target.value)} />
+                value={l.qty} onChange={(e) => set(i, 'qty', e.target.value)} placeholder="Clothes qty" />
             </div>
           </div>
         ))}
+
+        <button
+          type="button"
+          className="chip"
+          style={{ marginBottom: 14 }}
+          onClick={() => setLines([...lines, { name: 'Extra items', group: 'wash_fold', kg: '', qty: 1 }])}
+        >
+          + Add another service line
+        </button>
 
         {/* Live calculated price box */}
         <div className="b2c-price-calc-box">
@@ -201,7 +233,7 @@ function EditSheet({ row, onClose, pricesCatalog = {}, onSaved }) {
             </div>
           )}
           <div className="b2c-price-calc-total">
-            <span>Calculated New Total:</span>
+            <span>Calculated Total:</span>
             <span style={{ fontSize: 17, color: '#047857' }}>
               ₹{priceInfo.total} <span style={{ fontSize: 12, fontWeight: 400, color: '#64748b' }}>(was ₹{row.payment.amount})</span>
             </span>
@@ -209,14 +241,27 @@ function EditSheet({ row, onClose, pricesCatalog = {}, onSaved }) {
         </div>
 
         <div className="form-row">
+          <label className="form-label">Custom Price Override <span className="ops-muted">(Optional — leave blank to use calculated ₹{priceInfo.total})</span></label>
+          <input
+            className="form-input"
+            type="number"
+            min="0"
+            step="1"
+            value={customTotal}
+            onChange={(e) => setCustomTotal(e.target.value)}
+            placeholder={`Auto: ₹${priceInfo.total}`}
+          />
+        </div>
+
+        <div className="form-row">
           <label className="form-label">Reason for correction</label>
-          <input className="form-input" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Re-weighed at store: 4.2 kg" />
+          <input className="form-input" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Re-weighed at store counter" />
         </div>
 
         {error && <div className="form-error">{error}</div>}
 
         <button className="btn-primary" type="submit" disabled={saving} style={{ width: '100%', marginTop: 8 }}>
-          {saving ? <Loader2 size={16} className="spin" /> : null} Save Weight & Update Price (₹{priceInfo.total})
+          {saving ? <Loader2 size={16} className="spin" /> : null} Save Changes & Update Bill (₹{finalPrice})
         </button>
       </form>
     </Sheet>
@@ -344,7 +389,7 @@ function OrderRow({ row, highlight, isJustEdited, onEdit, onCancel, onEditPaymen
         <tbody>
           {row.lines.map((l) => {
             const r = row.rider.find((x) => x.name === l.name);
-            const edited = row.corrected && r && (round1(r.kg) !== round1(l.kg) || num(r.qty) !== num(l.qty));
+            const edited = row.corrected && r && (Math.round(num(r.kg) * 100) !== Math.round(num(l.kg) * 100) || num(r.qty) !== num(l.qty));
             return (
               <tr key={l.name}>
                 <td>
@@ -352,11 +397,11 @@ function OrderRow({ row, highlight, isJustEdited, onEdit, onCancel, onEditPaymen
                   <span className="ops-muted"> · {groupLabel[l.group] || l.group}</span>
                 </td>
                 <td className="ops-num">
-                  {isKgLine(l) && <span style={{ fontWeight: 700 }}>{round1(l.kg)} kg · </span>}
+                  {isKgLine(l) && <span style={{ fontWeight: 700 }}>{fmtKg(l.kg)} · </span>}
                   <span>{l.qty} pcs</span>
                   {edited && (
                     <div className="ops-was">
-                      rider: {isKgLine(r) && `${round1(r.kg)} kg · `}{r.qty} pcs
+                      rider: {isKgLine(r) && `${fmtKg(r.kg)} · `}{r.qty} pcs
                     </div>
                   )}
                 </td>
