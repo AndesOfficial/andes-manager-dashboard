@@ -69,7 +69,7 @@ export default function useRangeData({ from, to }, enabled) {
         if (bTime !== aTime) return bTime - aTime;
 
         // 3. Fallback: customer name
-        return a.customer.localeCompare(b.customer);
+        return String(a.customer || '').localeCompare(String(b.customer || ''));
       });
   }, [orders, verifications, categories, from, to]);
 

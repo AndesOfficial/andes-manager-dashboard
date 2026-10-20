@@ -72,15 +72,30 @@ export function groupOf(rawKey, categories = {}) {
 const MONTHS = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
 
 /** 'YYYY-MM-DD' of a Date in India time. */
-export const istDay = (d) => new Date(d.getTime() + 330 * 60000).toISOString().slice(0, 10);
+export const istDay = (d) => {
+  if (!d || !(d instanceof Date) || isNaN(d.getTime())) return '';
+  try {
+    return new Date(d.getTime() + 330 * 60000).toISOString().slice(0, 10);
+  } catch {
+    return '';
+  }
+};
 
 const toDate = (v) => {
   if (!v) return null;
-  if (typeof v.toDate === 'function') return v.toDate();
+  if (typeof v.toDate === 'function') {
+    try {
+      const d = v.toDate();
+      return (d instanceof Date && !isNaN(d.getTime())) ? d : null;
+    } catch {
+      return null;
+    }
+  }
   if (v instanceof Date) return isNaN(v.getTime()) ? null : v;
   if (typeof v === 'number' || /^\d{10,}$/.test(String(v).trim())) {
     const n = Number(v);
-    return new Date(n < 10000000000 ? n * 1000 : n);
+    const d = new Date(n < 10000000000 ? n * 1000 : n);
+    return isNaN(d.getTime()) ? null : d;
   }
   if (typeof v === 'string') {
     const trimmed = v.trim();
