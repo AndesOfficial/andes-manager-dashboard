@@ -432,17 +432,20 @@ export default function B2CTab({ rows, focusId, range }) {
     );
   }, [rows, lastEditedId]);
 
-  const delayedCount = useMemo(() => rows.filter((r) => r.isDelayed).length, [rows]);
+  const delayedCount = useMemo(() => rows.filter((r) => r.isDelayed && !matchesFilter(r, 'cancelled')).length, [rows]);
 
   const leadCounts = useMemo(() => {
-    const c = { all: rows.length };
+    const relevantRows = filter === 'cancelled'
+      ? rows.filter((r) => matchesFilter(r, 'cancelled'))
+      : rows.filter((r) => !matchesFilter(r, 'cancelled'));
+    const c = { all: relevantRows.length };
     LEAD_SOURCE_TYPES.forEach((l) => { if (l.id !== 'all') c[l.id] = 0; });
-    rows.forEach((r) => {
+    relevantRows.forEach((r) => {
       const src = r.leadSource || 'other';
       c[src] = (c[src] || 0) + 1;
     });
     return c;
-  }, [rows]);
+  }, [rows, filter]);
 
   const list = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -531,8 +534,16 @@ export default function B2CTab({ rows, focusId, range }) {
       ) : list.length === 0 ? (
         <div style={{ textAlign: 'center' }}>
           <EmptyState
-            title={filter === 'todo' ? 'All orders verified 🎉' : filter === 'delayed' ? 'No delayed orders 🎉' : 'No matches'}
-            sub="Try another filter or search."
+            title={
+              filter === 'todo'
+                ? 'All orders verified 🎉'
+                : filter === 'delayed'
+                ? 'No delayed orders 🎉'
+                : filter === 'cancelled'
+                ? 'No cancelled orders'
+                : 'No matches'
+            }
+            sub={filter === 'cancelled' ? 'No cancelled orders for these dates.' : 'Try another filter or search.'}
           />
           {filter === 'todo' && counts.all > 0 && (
             <button

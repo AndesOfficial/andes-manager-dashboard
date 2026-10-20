@@ -818,7 +818,7 @@ export function calculateB2bBatchRevenue(entry, countOnDate = 1) {
 /** Totals for live (non-cancelled) rows plus per-group breakdown. */
 export function b2cTotals(rows) {
   const live = rows.filter((r) => r.status !== 'cancelled');
-  const delayed = rows.filter((r) => r.isDelayed);
+  const delayed = rows.filter((r) => r.isDelayed && r.status !== 'cancelled');
   const groups = Object.fromEntries(SERVICE_GROUPS.map((g) => [g.id, { orders: new Set(), kg: 0, clothes: 0, rows: [] }]));
   live.forEach((r) => r.lines.forEach((l) => {
     const g = groups[l.group] || groups.other;

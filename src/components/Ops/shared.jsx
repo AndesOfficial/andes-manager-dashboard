@@ -126,16 +126,41 @@ export const STATUS_FILTERS = [
   { id: 'cancelled', label: 'Cancelled' },
 ];
 export const matchesFilter = (rowOrStatus, filter, keepRowId = null) => {
-  if (filter === 'all') return true;
-  if (rowOrStatus && typeof rowOrStatus === 'object') {
-    if (keepRowId && rowOrStatus.id === keepRowId) return true;
-    if (filter === 'delayed') return !!rowOrStatus.isDelayed;
-    const status = rowOrStatus.status;
-    if (filter === 'todo') return status === 'pending' || status === 'changed';
-    return status === filter;
+  const isObject = rowOrStatus && typeof rowOrStatus === 'object';
+  const status = isObject ? rowOrStatus.status : rowOrStatus;
+  const isCancelled =
+    status === 'cancelled' ||
+    (isObject &&
+      (String(rowOrStatus.orderStatus || '').toLowerCase() === 'cancelled' ||
+       String(rowOrStatus.orderStatus || '').toLowerCase() === 'canceled'));
+
+  if (keepRowId && isObject && rowOrStatus.id === keepRowId) {
+    return true;
   }
-  const status = rowOrStatus;
-  if (filter === 'todo') return status === 'pending' || status === 'changed';
+
+  // Cancelled filter button: show ONLY cancelled orders
+  if (filter === 'cancelled') {
+    return isCancelled;
+  }
+
+  // For any other filter (including 'all', 'todo', 'delayed', 'verified'):
+  // NEVER show cancelled orders unless explicitly on the 'cancelled' filter!
+  if (isCancelled) {
+    return false;
+  }
+
+  if (filter === 'all') {
+    return true;
+  }
+
+  if (filter === 'delayed') {
+    return !!(isObject && rowOrStatus.isDelayed);
+  }
+
+  if (filter === 'todo') {
+    return status === 'pending' || status === 'changed';
+  }
+
   return status === filter;
 };
 
