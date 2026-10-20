@@ -8,6 +8,7 @@ import B2CTab from './components/Ops/B2CTab';
 import B2BTab from './components/Ops/B2BTab';
 import IssuesTab from './components/Issues/IssuesTab';
 import ArchiveTab from './components/Ops/ArchiveTab';
+import ErrorBoundary from './components/ErrorBoundary';
 import { RangeBar, todayStr, rangeLabel } from './components/Ops/shared';
 import useRangeData from './hooks/useDayData';
 import {
@@ -228,23 +229,25 @@ export default function App() {
 
         {/* Active Tab Panel */}
         <div className="tab-content-panel">
-          {isDayTab && <RangeBar range={range} onChange={(r) => { setRange(r); setFocusId(null); }} />}
-          {isDayTab && data.error && <div className="form-error" style={{ marginBottom: 12 }}>{data.error}</div>}
-          {isDayTab && data.loading ? (
-            <div className="loading-state"><Loader2 size={22} className="spin" /><span>Loading {rangeLabel(range)}…</span></div>
-          ) : tab === 'overview' ? (
-            <OverviewTab b2c={data.b2c} b2bSum={data.b2bSum} onGo={go} />
-          ) : tab === 'b2b' ? (
-            <B2BTab range={range} entries={data.b2bEntries} clients={hostels} adding={adding} onAddClose={() => setAdding(false)} />
-          ) : tab === 'b2c' ? (
-            <B2CTab rows={data.b2cRows} focusId={focusId} range={range} />
-          ) : tab === 'issues' ? (
-            <IssuesTab clients={hostels} />
-          ) : tab === 'inventory' ? (
-            <InventoryTab />
-          ) : (
-            <ArchiveTab />
-          )}
+          <ErrorBoundary key={tab}>
+            {isDayTab && <RangeBar range={range} onChange={(r) => { setRange(r); setFocusId(null); }} />}
+            {isDayTab && data.error && <div className="form-error" style={{ marginBottom: 12 }}>{data.error}</div>}
+            {isDayTab && data.loading ? (
+              <div className="loading-state"><Loader2 size={22} className="spin" /><span>Loading {rangeLabel(range)}…</span></div>
+            ) : tab === 'overview' ? (
+              <OverviewTab b2c={data.b2c} b2bSum={data.b2bSum} onGo={go} />
+            ) : tab === 'b2b' ? (
+              <B2BTab range={range} entries={data.b2bEntries} clients={hostels} adding={adding} onAddClose={() => setAdding(false)} />
+            ) : tab === 'b2c' ? (
+              <B2CTab rows={data.b2cRows} focusId={focusId} range={range} />
+            ) : tab === 'issues' ? (
+              <IssuesTab clients={hostels} />
+            ) : tab === 'inventory' ? (
+              <InventoryTab />
+            ) : (
+              <ArchiveTab />
+            )}
+          </ErrorBoundary>
         </div>
 
       </main>
