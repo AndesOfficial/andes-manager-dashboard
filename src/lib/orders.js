@@ -173,6 +173,20 @@ export function pickupDay(o) {
   return '';
 }
 
+export const safeString = (val) => {
+  if (val === null || val === undefined) return null;
+  if (typeof val === 'string') {
+    const s = val.trim();
+    return s || null;
+  }
+  if (typeof val === 'number') return String(val);
+  if (typeof val === 'object') {
+    const s = val.name || val.slot || val.label || val.title;
+    if (typeof s === 'string' && s.trim()) return s.trim();
+  }
+  return null;
+};
+
 /** Expected drop/delivery day of a rider order in 'YYYY-MM-DD' IST format. */
 export function getDropDay(o) {
   if (!o) return '';
@@ -186,7 +200,14 @@ export function getDropDay(o) {
     if (d) return istDay(d);
   }
 
-  // 2. dropTime / deliveryTime / dropSlot
+  // 2. deliveryBy object from Flutter user app (e.g. { combined: '...', others: '...', shoes: '...' })
+  if (o.deliveryBy && typeof o.deliveryBy === 'object') {
+    const rawBy = o.deliveryBy.combined || o.deliveryBy.others || o.deliveryBy.shoes;
+    const d = toDate(rawBy);
+    if (d) return istDay(d);
+  }
+
+  // 3. dropTime / deliveryTime / dropSlot
   const dt = o.dropTime || o.deliveryTime || o.dropSlot;
   const dtDate = toDate(dt);
   if (dtDate) return istDay(dtDate);
@@ -411,26 +432,35 @@ export function buildB2cRow(order, verification, categories, referenceDay = istD
   const isDelayed = delayedDays > 0;
   const isDelivered = isOrderDelivered(order.status);
   const payment = getPaymentInfo(order, verification);
-  const pickupRider =
+  const rawRider =
     order.pickupRiderName ||
     order.riderName ||
     (typeof order.rider === 'string' ? order.rider : order.rider?.name || order.rider?.riderName) ||
     (typeof order.assignedTo === 'string' ? order.assignedTo : order.assignedTo?.name || order.assignedTo?.riderName) ||
-    order.deliveryBy ||
+    (typeof order.deliveryRider === 'string' ? order.deliveryRider : order.deliveryRider?.name) ||
+    (typeof order.assignedRider === 'string' ? order.assignedRider : order.assignedRider?.name) ||
     order.assignedRiderName ||
     (order.riderId ? 'Assigned Rider' : null);
-  const riderName =
+  const pickupRider = safeString(rawRider);
+
+  const rawRiderName =
     order.riderName ||
     order.pickupRiderName ||
     (typeof order.rider === 'string' ? order.rider : order.rider?.name || order.rider?.riderName) ||
     order.assignedRiderName ||
     null;
-  const riderPhone =
+  const riderName = safeString(rawRiderName) || pickupRider;
+
+  const rawRiderPhone =
     order.riderPhone ||
     order.pickupRiderPhone ||
     order.riderMobile ||
     (typeof order.rider === 'object' ? order.rider?.phone || order.rider?.mobile : null) ||
     null;
+  const riderPhone = safeString(rawRiderPhone);
+
+  const pickupSlot = safeString(order.pickupSlot) || (typeof order.pickupTime === 'string' ? order.pickupTime.trim() : null);
+  const dropSlot = safeString(order.dropSlot) || (typeof order.dropTime === 'string' ? order.dropTime.trim() : (typeof order.deliveryTime === 'string' ? order.deliveryTime.trim() : null));
 
   return {
     id: order.id,
@@ -439,8 +469,8 @@ export function buildB2cRow(order, verification, categories, referenceDay = istD
     leadSource,
     pickupDay: pickup,
     dropDay: drop,
-    pickupSlot: order.pickupSlot || (typeof order.pickupTime === 'string' ? order.pickupTime : null),
-    dropSlot: order.dropSlot || (typeof order.dropTime === 'string' ? order.dropTime : typeof order.deliveryTime === 'string' ? order.deliveryTime : null),
+    pickupSlot,
+    dropSlot,
     pickupRider,
     riderName,
     riderPhone,

@@ -305,17 +305,17 @@ function OrderRow({ row, highlight, isJustEdited, onEdit, onCancel, onEditPaymen
         <span className="b2c-schedule-item">
           <Calendar size={12} style={{ color: '#2563eb' }} />
           <span>Pickup: <strong>{fmtDay(row.pickupDay)}</strong></span>
-          {row.pickupSlot && <span className="ops-muted">({row.pickupSlot})</span>}
+          {typeof row.pickupSlot === 'string' && row.pickupSlot && <span className="ops-muted">({row.pickupSlot})</span>}
         </span>
         <span className="b2c-schedule-item">
           <Clock size={12} style={{ color: '#059669' }} />
           <span>Drop: <strong>{row.dropDay ? fmtDay(row.dropDay) : 'Standard'}</strong></span>
-          {row.dropSlot && <span className="ops-muted">({row.dropSlot})</span>}
+          {typeof row.dropSlot === 'string' && row.dropSlot && <span className="ops-muted">({row.dropSlot})</span>}
         </span>
         <span className="b2c-schedule-item" title="Rider who picked up this order">
           <Bike size={13} style={{ color: '#7c3aed' }} />
-          <span>Rider: <strong style={{ color: '#1e293b' }}>{row.pickupRider || row.riderName || 'Not assigned'}</strong></span>
-          {row.riderPhone && (
+          <span>Rider: <strong style={{ color: '#1e293b' }}>{typeof row.pickupRider === 'string' ? row.pickupRider : typeof row.riderName === 'string' ? row.riderName : 'Not assigned'}</strong></span>
+          {typeof row.riderPhone === 'string' && row.riderPhone && (
             <a href={`tel:${row.riderPhone}`} style={{ color: '#2563eb', marginLeft: 4 }} title={`Call rider (${row.riderPhone})`}>
               📞
             </a>
@@ -459,8 +459,14 @@ export default function B2CTab({ rows, focusId, range }) {
         if (!inRange && r.id !== lastEditedId) return false;
       }
 
-      if (leadFilter !== 'all' && (r.leadSource || 'other') !== leadFilter) return false;
-      if (q && !r.customer.toLowerCase().includes(q) && !r.phone.includes(q) && !r.id.toLowerCase().includes(q) && !(r.pickupRider && r.pickupRider.toLowerCase().includes(q))) return false;
+      if (
+        q &&
+        !String(r.customer || '').toLowerCase().includes(q) &&
+        !String(r.phone || '').includes(q) &&
+        !String(r.id || '').toLowerCase().includes(q) &&
+        !(typeof r.pickupRider === 'string' && r.pickupRider.toLowerCase().includes(q))
+      )
+        return false;
       return true;
     });
   }, [rows, search, filter, leadFilter, range, lastEditedId]);
