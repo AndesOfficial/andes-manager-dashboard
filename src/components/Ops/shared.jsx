@@ -10,7 +10,10 @@ export const shiftDay = (day, n) => {
   d.setDate(d.getDate() + n);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
-export const fmtKg = (n) => `${(Number(n) || 0).toFixed(1)} kg`;
+export const fmtKg = (n) => {
+  const v = Number(n) || 0;
+  return `${Number.isInteger(v * 10) ? v.toFixed(1) : v.toFixed(2)} kg`;
+};
 export const fmtDay = (day) => {
   if (!day) return '—';
   try {

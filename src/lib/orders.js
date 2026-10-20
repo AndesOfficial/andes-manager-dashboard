@@ -877,7 +877,7 @@ export function b2bTotals(entries) {
 
   return {
     entries: live.length,
-    kg: round1(totalKg),
+    kg: Math.round(totalKg * 100) / 100,
     clothes: live.reduce((s, e) => s + num(e.clothes), 0),
     verified: live.filter((e) => e.status === 'verified').length,
     totalRevenue,
