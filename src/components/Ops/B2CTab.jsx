@@ -327,6 +327,11 @@ function OrderRow({ row, highlight, isJustEdited, onEdit, onCancel, onEditPaymen
               REWASH{row.rewash.parent ? ` · of #${row.rewash.parent}` : ''}
             </span>
           )}
+          {row.removedServices.length > 0 && (
+            <span className="badge badge-amber" title="Booked but not handed over; removed by the rider and left out of the bill">
+              Removed: {row.removedServices.join(', ')}
+            </span>
+          )}
           {row.rewash?.requestedFor && (
             <span className="badge badge-rewash-outline" title={`Rewash order ${row.rewash.requestedFor}`}>
               Rewash requested

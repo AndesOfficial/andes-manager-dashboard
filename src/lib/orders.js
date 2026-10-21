@@ -491,6 +491,10 @@ export function buildB2cRow(order, verification, categories, referenceDay = istD
     kg: sumKg(lines),
     clothes: sumQty(lines),
     rewash: rewashInfo(order),
+    // Booked services the rider removed because they weren't handed over.
+    removedServices: Array.isArray(order.removedServices)
+      ? [...new Set(order.removedServices.map((r) => safeString(r?.name)).filter(Boolean))]
+      : [],
   };
 }
 
