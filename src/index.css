@@ -621,6 +621,11 @@ body {
 .badge-amber { background: var(--amber-bg); color: #d97706; border: 1px solid var(--amber-border); }
 .badge-red { background: var(--red-bg); color: var(--red); border: 1px solid var(--red-border); }
 .badge-gray { background: #f1f5f9; color: var(--ink-soft); border: 1px solid #e2e8f0; }
+.badge-rewash { background: #7c3aed; color: #fff; }
+.badge-rewash-outline { background: #f5f3ff; color: #6d28d9; border: 1px solid #c4b5fd; }
+.b2c-rewash-strip { margin: 6px 0; padding: 8px 10px; border-radius: 8px; background: #f5f3ff; border: 1px solid #c4b5fd; color: #4c1d95; font-size: 13px; }
+.b2c-rewash-photos { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.b2c-rewash-photos img { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; }
 
 /* ---- empty / loading ---- */
 .empty-state {

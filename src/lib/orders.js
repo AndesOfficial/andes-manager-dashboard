@@ -490,7 +490,30 @@ export function buildB2cRow(order, verification, categories, referenceDay = istD
     locked: !!v.adminLockedAt,
     kg: sumKg(lines),
     clothes: sumQty(lines),
+    rewash: rewashInfo(order),
   };
+}
+
+const REWASH_REASONS = { stain: 'Stain not removed', smell: 'Bad smell', damp: 'Still damp', other: 'Other' };
+
+/**
+ * Rewash: a free redo of a delivered order, created by the rider app
+ * (createRewash). Null for ordinary orders. `requestedFor` marks an order
+ * that has been rewashed.
+ */
+export function rewashInfo(order) {
+  if (order.isRewash === true) {
+    return {
+      isRewash: true,
+      parent: order.parentOrderNumber ?? order.parentOrderId ?? null,
+      reason: REWASH_REASONS[order.rewashReason] || order.rewashReason || null,
+      garments: order.rewashGarmentCount ?? null,
+      note: safeString(order.rewashNote),
+      photos: Array.isArray(order.rewashPhotoUrls) ? order.rewashPhotoUrls : [],
+    };
+  }
+  if (order.rewashOrderId) return { isRewash: false, requestedFor: order.rewashOrderId };
+  return null;
 }
 
 /**
@@ -816,7 +839,8 @@ export function calculateB2bBatchRevenue(entry, countOnDate = 1) {
 
 /** Totals for live (non-cancelled) rows plus per-group breakdown. */
 export function b2cTotals(rows) {
-  const live = rows.filter((r) => r.status !== 'cancelled');
+  // A rewash re-handles clothes already counted on its original order.
+  const live = rows.filter((r) => r.status !== 'cancelled' && !r.rewash?.isRewash);
   const delayed = rows.filter((r) => r.isDelayed && r.status !== 'cancelled');
   const groups = Object.fromEntries(SERVICE_GROUPS.map((g) => [g.id, { orders: new Set(), kg: 0, clothes: 0, rows: [] }]));
   live.forEach((r) => r.lines.forEach((l) => {

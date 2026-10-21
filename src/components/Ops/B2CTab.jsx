@@ -268,6 +268,26 @@ function EditSheet({ row, onClose, pricesCatalog = {}, onSaved }) {
   );
 }
 
+function RewashStrip({ rewash }) {
+  return (
+    <div className="b2c-rewash-strip">
+      <strong>Free rewash</strong>
+      {rewash.reason ? <span> · {rewash.reason}</span> : <span className="ops-muted"> · details recorded at pickup</span>}
+      {rewash.garments != null && <span> · {rewash.garments} garments</span>}
+      {rewash.note && <div className="ops-muted">{rewash.note}</div>}
+      {rewash.photos.length > 0 && (
+        <div className="b2c-rewash-photos">
+          {rewash.photos.map((url) => (
+            <a key={url} href={url} target="_blank" rel="noreferrer">
+              <img src={url} alt="Rewash issue" />
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function OrderRow({ row, highlight, isJustEdited, onEdit, onCancel, onEditPayment }) {
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -300,6 +320,16 @@ function OrderRow({ row, highlight, isJustEdited, onEdit, onCancel, onEditPaymen
           {row.orderStatus && (
             <span className="b2c-order-status-badge">
               {row.orderStatus}
+            </span>
+          )}
+          {row.rewash?.isRewash && (
+            <span className="badge badge-rewash">
+              REWASH{row.rewash.parent ? ` · of #${row.rewash.parent}` : ''}
+            </span>
+          )}
+          {row.rewash?.requestedFor && (
+            <span className="badge badge-rewash-outline" title={`Rewash order ${row.rewash.requestedFor}`}>
+              Rewash requested
             </span>
           )}
           {isJustEdited && (
@@ -367,6 +397,8 @@ function OrderRow({ row, highlight, isJustEdited, onEdit, onCancel, onEditPaymen
           )}
         </span>
       </div>
+
+      {row.rewash?.isRewash && <RewashStrip rewash={row.rewash} />}
 
       {/* 4. Key Metrics Grid: Total Weight, Total Clothes, Total Amount */}
       <div className="b2c-metrics-grid">
