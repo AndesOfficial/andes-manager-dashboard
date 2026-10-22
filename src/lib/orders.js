@@ -524,8 +524,34 @@ export function rewashInfo(order) {
  * Calculates updated B2C price when weights or quantities are edited.
  * Uses order breakdown rates, order.services rates, order.ratePerKg, or prices catalog.
  */
+/**
+ * Free promo-campaign units per line (kg for kg lines), from the share the
+ * server writes on the order (`order.campaign`, customer repo
+ * function/campaign.ts). Those units are ₹0, as on the server bill.
+ */
+function campaignFreeUnits(order) {
+  const free = new Map();
+  const c = order?.campaign;
+  if (!c || c.state === 'released' || !Array.isArray(c.lines)) return free;
+  for (const l of c.lines) {
+    const qty = num(l?.freeQty);
+    if (qty <= 0 || !l.cartKey) continue;
+    const key = cleanName(l.cartKey).toLowerCase();
+    free.set(key, (free.get(key) || 0) + (l.baseUnit === 'g' ? qty / 1000 : qty));
+  }
+  return free;
+}
+
 export function calculateB2cPrice(order, lines, pricesCatalog = {}) {
   if (!order) return { subtotal: 0, total: 0, perKgRate: 79, items: [] };
+  const campaignFree = campaignFreeUnits(order);
+  const takeFree = (name, units) => {
+    const key = cleanName(name).toLowerCase();
+    const n = Math.max(0, Math.min(campaignFree.get(key) || 0, units));
+    if (n > 0) campaignFree.set(key, campaignFree.get(key) - n);
+    return n;
+  };
+  let campaignDiscount = 0;
 
   // 1. Determine rate per kg for wash lines
   let perKgRate = num(order.ratePerKg);
@@ -562,9 +588,11 @@ export function calculateB2cPrice(order, lines, pricesCatalog = {}) {
       let rate = perKgRate;
       const bItem = order.breakdown?.perKg?.items?.find((it) => cleanName(it.name).toLowerCase() === cleanName(l.name).toLowerCase());
       if (bItem && num(bItem.rate) > 0) rate = num(bItem.rate);
-      const lineAmt = Math.round(wt * rate);
+      const freeKg = takeFree(l.name, wt);
+      const lineAmt = Math.round((wt - freeKg) * rate);
+      campaignDiscount += Math.round(freeKg * rate);
       perKgSubtotal += lineAmt;
-      items.push({ name: l.name, group: l.group, isKg: true, rate, weight: wt, qty: num(l.qty), amount: lineAmt });
+      items.push({ name: l.name, group: l.group, isKg: true, rate, weight: wt, qty: num(l.qty), amount: lineAmt, ...(freeKg > 0 ? { campaignQuantity: freeKg } : {}) });
     } else {
       const qty = num(l.qty);
       let pieceRate = 0;
@@ -579,9 +607,11 @@ export function calculateB2cPrice(order, lines, pricesCatalog = {}) {
         const pDoc = pricesCatalog[cleanName(l.name).toLowerCase()] || pricesCatalog[String(l.name).toLowerCase()];
         if (pDoc) pieceRate = num(pDoc.price ?? pDoc.rate ?? pDoc.pricePerPiece);
       }
-      const lineAmt = Math.round(qty * pieceRate);
+      const freeQty = takeFree(l.name, qty);
+      const lineAmt = Math.round((qty - freeQty) * pieceRate);
+      campaignDiscount += Math.round(freeQty * pieceRate);
       perPieceSubtotal += lineAmt;
-      items.push({ name: l.name, group: l.group, isKg: false, rate: pieceRate, qty, amount: lineAmt });
+      items.push({ name: l.name, group: l.group, isKg: false, rate: pieceRate, qty, amount: lineAmt, ...(freeQty > 0 ? { campaignQuantity: freeQty } : {}) });
     }
   }
 
@@ -603,6 +633,9 @@ export function calculateB2cPrice(order, lines, pricesCatalog = {}) {
     deliveryCharge,
     convenienceFee,
     discounts: couponDiscount + promotionDiscount + walletAmountUsed,
+    // Already ₹0 inside the subtotals; for display.
+    campaignDiscount,
+    campaignLabel: campaignDiscount > 0 ? (order.campaign?.campaignName || 'Offer') : null,
     items,
   };
 }

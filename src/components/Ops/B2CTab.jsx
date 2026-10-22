@@ -220,6 +220,12 @@ function EditSheet({ row, onClose, pricesCatalog = {}, onSaved }) {
             <span>Items Subtotal:</span>
             <span>₹{priceInfo.subtotal}</span>
           </div>
+          {priceInfo.campaignDiscount > 0 && (
+            <div className="b2c-price-calc-row" style={{ color: '#c2410c' }}>
+              <span>{priceInfo.campaignLabel} (free units, already ₹0 above):</span>
+              <span>₹{priceInfo.campaignDiscount}</span>
+            </div>
+          )}
           {(priceInfo.deliveryCharge > 0 || priceInfo.convenienceFee > 0) && (
             <div className="b2c-price-calc-row">
               <span>Delivery & Fees:</span>
