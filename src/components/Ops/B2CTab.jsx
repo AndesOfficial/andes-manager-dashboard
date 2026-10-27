@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Search, Loader2, CreditCard, AlertTriangle, Pencil, CheckCircle2, X,
-  Copy, Check, Phone, Calendar, Clock, Sparkles, Bike
+  Copy, Check, Phone, Calendar, Clock, Sparkles, Bike, Plus
 } from 'lucide-react';
 import { saveB2cVerification, updateB2cPayment, fetchPricesCatalog } from '../../firebase';
 import { SERVICE_GROUPS, diffLines, num, round1, LEAD_SOURCE_TYPES, calculateB2cPrice } from '../../lib/orders';
@@ -9,6 +9,7 @@ import {
   fmtKg, fmtDay, EmptyState, Sheet, StatusBadge, RowActions, ReasonSheet, HistoryList,
   STATUS_FILTERS, matchesFilter,
 } from './shared';
+import CreateWalkInOrderSheet from './CreateWalkInOrderSheet';
 
 const groupLabel = Object.fromEntries(SERVICE_GROUPS.map((g) => [g.id, g.label]));
 const isKgLine = (l) => l.group === 'wash_fold' || l.group === 'wash_iron';
@@ -493,7 +494,7 @@ function OrderRow({ row, highlight, isJustEdited, onEdit, onCancel, onEditPaymen
   );
 }
 
-export default function B2CTab({ rows, focusId, range }) {
+export default function B2CTab({ rows, focusId, range, addingWalkIn = false, onAddWalkInClose }) {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
   const [leadFilter, setLeadFilter] = useState('all');
@@ -502,6 +503,13 @@ export default function B2CTab({ rows, focusId, range }) {
   const [cancelling, setCancelling] = useState(null);
   const [lastEditedId, setLastEditedId] = useState(null);
   const [pricesCatalog, setPricesCatalog] = useState({});
+  const [creatingWalkIn, setCreatingWalkIn] = useState(false);
+
+  const isCreatingWalkIn = creatingWalkIn || addingWalkIn;
+  const handleCloseWalkIn = () => {
+    setCreatingWalkIn(false);
+    if (onAddWalkInClose) onAddWalkInClose();
+  };
 
   useEffect(() => {
     fetchPricesCatalog().then(setPricesCatalog).catch((err) => console.error('fetchPricesCatalog error:', err));
@@ -568,11 +576,20 @@ export default function B2CTab({ rows, focusId, range }) {
 
   return (
     <div>
-      <div className="toolbar">
-        <div className="search-wrap">
+      <div className="toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+        <div className="search-wrap" style={{ flex: 1 }}>
           <Search size={16} className="search-icon" />
           <input className="search-input" placeholder="Search name, phone, order ID, or rider" value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
+        <button
+          type="button"
+          className="btn-primary"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 16px', borderRadius: 10, fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', cursor: 'pointer' }}
+          onClick={() => setCreatingWalkIn(true)}
+        >
+          <Plus size={16} />
+          <span>Create Walk-in Order</span>
+        </button>
       </div>
 
       {delayedCount > 0 && (
@@ -675,6 +692,16 @@ export default function B2CTab({ rows, focusId, range }) {
           confirmLabel="Cancel record"
           onClose={() => setCancelling(null)}
           onConfirm={(reason) => saveB2cVerification(cancelling, 'cancel', { lines: cancelling.lines, reason })}
+        />
+      )}
+      {isCreatingWalkIn && (
+        <CreateWalkInOrderSheet
+          pricesCatalog={pricesCatalog}
+          onCreated={(newId) => {
+            setLastEditedId(newId);
+            setFilter('all');
+          }}
+          onClose={handleCloseWalkIn}
         />
       )}
     </div>

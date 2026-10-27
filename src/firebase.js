@@ -322,6 +322,212 @@ export async function updateB2cPayment(orderId, { status, method, amount, notes 
   });
 }
 
+/**
+ * Fetch active riders from `riders` collection for manager assignment.
+ * Excludes managers and admins, returns active riders sorted by name.
+ */
+export async function fetchActiveRiders() {
+  try {
+    const snap = await getDocs(collection(db, 'riders'));
+    return snap.docs
+      .map((d) => {
+        const data = d.data();
+        return {
+          id: d.id,
+          ...data,
+          name: data.name || data.riderName || 'Rider',
+          phone: data.phone || data.mobile || '',
+          onDuty: data.onDuty === true,
+          isActive: data.isActive !== false,
+          activeCount: Number(data.activeOrderCount) || 0,
+        };
+      })
+      .filter((r) => {
+        const role = String(r.role || '').toLowerCase();
+        return role !== 'ridermanager' && role !== 'admin' && r.isActive;
+      })
+      .sort((a, b) => {
+        // Sort on-duty riders first, then by name
+        if (a.onDuty !== b.onDuty) return a.onDuty ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+  } catch (err) {
+    console.error('fetchActiveRiders error:', err);
+    return [];
+  }
+}
+
+/**
+ * Creates a new Walk-in B2C Order.
+ * Walk-in orders have NO pickup stop. They start directly at 'ready for delivery'
+ * (at the laundry facility).
+ * If deliverySelected is true and assignedRider is provided, it assigns the delivery
+ * directly to the rider so it reflects immediately on their Rider App.
+ * Also initializes managerVerifications document so the order is immediately verified
+ * and reflected across all B2C metrics.
+ */
+export async function createWalkInOrder({
+  customerName,
+  customerPhone,
+  address = '',
+  lines = [],
+  deliverySelected = false,
+  dropDate = null,
+  dropSlot = null,
+  assignedRider = null,
+  payment = { status: 'paid', method: 'cod', amount: 0, notes: '' },
+}) {
+  const orderId = `walkin_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const cartRef = doc(db, 'cartdetails', orderId);
+  const verRef = doc(verCol, orderId);
+
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const orderNum = Math.floor(100000 + Math.random() * 900000);
+
+  const cleanLines = (lines || []).map((l) => ({
+    name: l.name || 'Service',
+    group: l.group || 'other',
+    kg: Math.round((Number(l.kg) || 0) * 100) / 100,
+    qty: Number(l.qty) || 1,
+    rate: Number(l.rate) || 0,
+  }));
+
+  const totalKg = Math.round(cleanLines.reduce((s, l) => s + (Number(l.kg) || 0), 0) * 100) / 100;
+  const totalClothes = cleanLines.reduce((s, l) => s + (Number(l.qty) || 0), 0);
+  const finalPrice = Number(payment.amount) || 0;
+  const isPaid = payment.status === 'paid';
+
+  const perKgDetails = {};
+  const serviceItems = cleanLines.map((l) => {
+    if (l.group === 'wash_fold' || l.group === 'wash_iron') {
+      perKgDetails[l.name] = { weight: Number(l.kg) || 0, count: Number(l.qty) || 0 };
+    }
+    return {
+      service: l.name,
+      serviceName: l.name,
+      name: l.name,
+      quantity: Number(l.qty) || 1,
+      pieces: Number(l.qty) || 1,
+      weight: Number(l.kg) || 0,
+      price: Number(l.rate) || 0,
+    };
+  });
+
+  const cartPayload = {
+    id: orderId,
+    globalOrderNumber: orderNum,
+    userName: customerName.trim(),
+    customerName: customerName.trim(),
+    name: customerName.trim(),
+    userMobile: customerPhone.trim(),
+    customerNumber: customerPhone.trim(),
+    phoneNumber: customerPhone.trim(),
+    location: {
+      address: address.trim() || 'Store Walk-in',
+      userEnteredAddress: address.trim() || 'Store Walk-in',
+      selectionSource: 'walk_in',
+    },
+    address: address.trim() || 'Store Walk-in',
+    leadSource: 'walk_in',
+    orderSource: 'walk_in',
+    source: 'walk_in',
+    isInstant: false,
+    services: serviceItems,
+    perKgDetails,
+    clothesCount: totalClothes,
+    clothes: totalClothes,
+    totalPieces: totalClothes,
+    clothesWeightKg: totalKg,
+    internalWeightKg: totalKg,
+    riderRecordedWeightKg: totalKg,
+    weight: totalKg,
+    totalCost: finalPrice,
+    totalAmount: finalPrice,
+    amount: finalPrice,
+    finalAmount: finalPrice,
+    originalTotalCost: finalPrice,
+    breakdownReady: true,
+    servicesConfirmed: true,
+    pickupDate: today,
+    scheduledPickupDate: today,
+    orderDate: today,
+    createdAt: serverTimestamp(),
+    orderTimestamp: Date.now(),
+    updatedAt: serverTimestamp(),
+    paymentStatus: isPaid ? 'completed' : 'pending',
+    paymentMethod: payment.method || 'cod',
+    paymentMethodOnDelivery: payment.method || 'cod',
+    paymentDoneOnDelivery: isPaid,
+    // Walk-in order specifics: NO pickup
+    hasPickup: false,
+    isWalkIn: true,
+    deliverySelected: !!deliverySelected,
+    status: 'ready for delivery',
+    ...(deliverySelected ? {
+      dropDate: dropDate || today,
+      dropDay: dropDate || today,
+      dropSlot: dropSlot || 'Standard Delivery',
+      deliveryTime: dropSlot || 'Standard Delivery',
+    } : {}),
+    ...(deliverySelected && assignedRider ? {
+      riderId: assignedRider.id,
+      riderName: assignedRider.name,
+      deliveryRiderId: assignedRider.id,
+      deliveryRiderName: assignedRider.name,
+      deliveryRiderPhone: assignedRider.phone || null,
+      riderPhone: assignedRider.phone || null,
+      assignmentMethod: 'manual',
+      autoAssignLocked: true,
+      needsManualAssignment: false,
+      assignedBy: actor(),
+      assignedAt: serverTimestamp(),
+    } : {
+      riderId: null,
+      riderName: null,
+    }),
+  };
+
+  const verPayload = {
+    source: 'b2c',
+    orderId,
+    pickupDate: today,
+    customer: customerName.trim(),
+    status: 'verified',
+    lines: cleanLines,
+    kg: totalKg,
+    clothes: totalClothes,
+    leadSource: 'walk_in',
+    isWalkIn: true,
+    verifiedAt: serverTimestamp(),
+    verifiedBy: actor(),
+    payment: {
+      status: payment.status || 'paid',
+      method: payment.method || 'cod',
+      amount: finalPrice,
+      notes: payment.notes || 'Walk-in order created by manager',
+      updatedAt: new Date().toISOString(),
+      updatedBy: actor(),
+    },
+    history: [{
+      action: 'create',
+      at: new Date().toISOString(),
+      by: actor(),
+      reason: 'Walk-in order created by manager at store counter',
+    }],
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    updatedBy: actor(),
+  };
+
+  await runTransaction(db, async (tx) => {
+    tx.set(cartRef, cartPayload);
+    tx.set(verRef, verPayload);
+  });
+
+  return { id: orderId, globalOrderNumber: orderNum };
+}
+
 /* ---- B2B: manager-entered batches (`managerB2bEntries`) ---- */
 
 const b2bEntryCol = collection(db, 'managerB2bEntries');

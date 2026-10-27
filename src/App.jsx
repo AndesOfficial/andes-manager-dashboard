@@ -34,6 +34,7 @@ export default function App() {
   const [range, setRange] = useState(() => ({ from: todayStr(), to: todayStr() }));
   const [focusId, setFocusId] = useState(null);
   const [adding, setAdding] = useState(false);
+  const [addingWalkIn, setAddingWalkIn] = useState(false);
   const [hostels, setHostels] = useState([]);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [loginEmail, setLoginEmail] = useState('');
@@ -136,11 +137,15 @@ export default function App() {
   const isDayTab = DAY_TABS.includes(tab);
   const toVerify = data.b2cRows.filter((r) => r.status === 'pending' || r.status === 'changed').length
     + data.b2bEntries.filter((e) => e.status === 'pending').length;
-  const addButton = tab === 'b2b' && (
+  const addButton = tab === 'b2b' ? (
     <button className="btn-action-primary" onClick={() => setAdding(true)}>
       <Plus size={16} /><span>Add B2B entry</span>
     </button>
-  );
+  ) : tab === 'b2c' ? (
+    <button className="btn-action-primary" onClick={() => setAddingWalkIn(true)}>
+      <Plus size={16} /><span>Create Walk-in Order</span>
+    </button>
+  ) : null;
 
   return (
     <div className="layout-container">
@@ -239,7 +244,13 @@ export default function App() {
             ) : tab === 'b2b' ? (
               <B2BTab range={range} entries={data.b2bEntries} clients={hostels} adding={adding} onAddClose={() => setAdding(false)} />
             ) : tab === 'b2c' ? (
-              <B2CTab rows={data.b2cRows} focusId={focusId} range={range} />
+              <B2CTab
+                rows={data.b2cRows}
+                focusId={focusId}
+                range={range}
+                addingWalkIn={addingWalkIn}
+                onAddWalkInClose={() => setAddingWalkIn(false)}
+              />
             ) : tab === 'issues' ? (
               <IssuesTab clients={hostels} />
             ) : tab === 'inventory' ? (
@@ -256,6 +267,11 @@ export default function App() {
       {tab === 'b2b' && !data.loading && (
         <button className="fab" onClick={() => setAdding(true)}>
           <Plus size={20} /> <span>Add B2B entry</span>
+        </button>
+      )}
+      {tab === 'b2c' && !data.loading && (
+        <button className="fab" onClick={() => setAddingWalkIn(true)}>
+          <Plus size={20} /> <span>Create Walk-in</span>
         </button>
       )}
 
