@@ -594,6 +594,11 @@ function OrderRow({ row, highlight, isJustEdited, onEdit, onCancel, onEditPaymen
             {row.payment.status === 'paid' ? 'Paid' : row.payment.status === 'failed' ? 'Failed' : 'Unpaid'} · {row.payment.methodLabel}
           </span>
           {row.payment.notes && <span className="ops-muted" title={row.payment.notes}>({row.payment.notes})</span>}
+          {Number(row.order?.cashback?.amount) > 0 && (
+            <span className="badge badge-amber" title="5% wallet cashback credited to the customer on delivery">
+              🎉 Cashback ₹{row.order.cashback.amount} credited
+            </span>
+          )}
         </div>
         <button
           type="button"
@@ -632,11 +637,9 @@ export default function B2CTab({ rows, focusId, range, addingWalkIn = false, onA
   const [cancelling, setCancelling] = useState(null);
   const [lastEditedId, setLastEditedId] = useState(null);
   const [pricesCatalog, setPricesCatalog] = useState({});
-  const [creatingWalkIn, setCreatingWalkIn] = useState(false);
-
-  const isCreatingWalkIn = creatingWalkIn || addingWalkIn;
+  // The page header's "Create Walk-in Order" button opens the sheet.
+  const isCreatingWalkIn = addingWalkIn;
   const handleCloseWalkIn = () => {
-    setCreatingWalkIn(false);
     if (onAddWalkInClose) onAddWalkInClose();
   };
 
@@ -710,15 +713,6 @@ export default function B2CTab({ rows, focusId, range, addingWalkIn = false, onA
           <Search size={16} className="search-icon" />
           <input className="search-input" placeholder="Search name, phone, order ID, or rider" value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
-        <button
-          type="button"
-          className="btn-primary"
-          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 16px', borderRadius: 10, fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', cursor: 'pointer' }}
-          onClick={() => setCreatingWalkIn(true)}
-        >
-          <Plus size={16} />
-          <span>Create Walk-in Order</span>
-        </button>
       </div>
 
       {delayedCount > 0 && (

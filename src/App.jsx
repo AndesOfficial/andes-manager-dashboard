@@ -269,11 +269,6 @@ export default function App() {
           <Plus size={20} /> <span>Add B2B entry</span>
         </button>
       )}
-      {tab === 'b2c' && !data.loading && (
-        <button className="fab" onClick={() => setAddingWalkIn(true)}>
-          <Plus size={20} /> <span>Create Walk-in</span>
-        </button>
-      )}
 
     </div>
   );
