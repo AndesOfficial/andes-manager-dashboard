@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Search, Loader2, CreditCard, AlertTriangle, Pencil, CheckCircle2, X,
-  Copy, Check, Phone, Calendar, Clock, Sparkles, Bike, Plus
+  Copy, Check, Phone, Calendar, Clock, Sparkles, Bike, Plus, ArrowUpCircle, Trash2
 } from 'lucide-react';
-import { saveB2cVerification, updateB2cPayment, fetchPricesCatalog } from '../../firebase';
+import { saveB2cVerification, updateB2cPayment, fetchPricesCatalog, upgradeB2cOrder, canUpgradeOrder } from '../../firebase';
 import { SERVICE_GROUPS, diffLines, num, round1, LEAD_SOURCE_TYPES, calculateB2cPrice } from '../../lib/orders';
 import {
   fmtKg, fmtDay, EmptyState, Sheet, StatusBadge, RowActions, ReasonSheet, HistoryList,
@@ -295,7 +295,132 @@ function RewashStrip({ rewash }) {
   );
 }
 
-function OrderRow({ row, highlight, isJustEdited, onEdit, onCancel, onEditPayment }) {
+// Free service upgrade: some clothes of the order move to a better service
+// (e.g. Wash & Fold → Dry Clean) at no cost to the customer.
+function UpgradeSheet({ row, editing, onClose, pricesCatalog = {} }) {
+  const fromOptions = [...new Set((row.lines || []).map((l) => l.name).filter(Boolean))];
+  const toOptions = useMemo(
+    () => Object.values(pricesCatalog).map((p) => p.name).filter(Boolean).sort(),
+    [pricesCatalog]
+  );
+  const maxCount = Math.max(1, num(row.clothes) || num(row.order?.clothesCount) || 1);
+  const [fromService, setFrom] = useState(editing?.fromService || fromOptions[0] || '');
+  const [toService, setTo] = useState(editing?.toService || '');
+  const [count, setCount] = useState(editing?.count ?? 1);
+  const [itemType, setItemType] = useState(editing?.itemType || '');
+  const [note, setNote] = useState(editing?.note || '');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    const n = Math.floor(num(count));
+    if (!fromService || !toService) return setError('Pick both services.');
+    if (fromService === toService) return setError('Pick a different service to upgrade to.');
+    if (n < 1 || n > maxCount) return setError(`Clothes must be between 1 and ${maxCount}.`);
+    setSaving(true);
+    setError('');
+    try {
+      await upgradeB2cOrder(row.id, editing ? 'edit' : 'add', {
+        id: editing?.id,
+        upgrade: { count: n, fromService, toService, itemType: itemType.trim(), note: note.trim() },
+      });
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Could not save the upgrade.');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Sheet title={editing ? 'Edit upgrade' : 'Upgrade services (free)'} onClose={onClose}>
+      <form onSubmit={submit}>
+        <div className="form-row">
+          <label className="form-label">From service</label>
+          <input className="form-input" list="upgrade-from" value={fromService} onChange={(e) => setFrom(e.target.value)} placeholder="e.g. Wash & Fold" />
+          <datalist id="upgrade-from">{fromOptions.map((n) => <option key={n} value={n} />)}</datalist>
+        </div>
+        <div className="form-row">
+          <label className="form-label">Upgrade to</label>
+          <input className="form-input" list="upgrade-to" value={toService} onChange={(e) => setTo(e.target.value)} placeholder="e.g. Dry Cleaning" />
+          <datalist id="upgrade-to">
+            {['Wash & Iron', 'Dry Cleaning', ...toOptions].filter((v, i, a) => a.indexOf(v) === i).map((n) => <option key={n} value={n} />)}
+          </datalist>
+        </div>
+        <div className="form-row">
+          <label className="form-label">How many clothes <span className="ops-muted">(order has {maxCount})</span></label>
+          <input className="form-input" type="number" min="1" max={maxCount} step="1" value={count} onChange={(e) => setCount(e.target.value)} />
+        </div>
+        <div className="form-row">
+          <label className="form-label">Item type <span className="ops-muted">(optional, e.g. Shirts)</span></label>
+          <input className="form-input" value={itemType} onChange={(e) => setItemType(e.target.value)} />
+        </div>
+        <div className="form-row">
+          <label className="form-label">Note to customer <span className="ops-muted">(optional)</span></label>
+          <input className="form-input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Delicate fabric, upgraded on us" />
+        </div>
+        <div className="ops-muted" style={{ marginBottom: 12 }}>
+          The bill does not change. The customer gets a notification and a pop-up in the app.
+        </div>
+        {error && <div className="form-error">{error}</div>}
+        <button className="btn-primary" type="submit" disabled={saving} style={{ width: '100%' }}>
+          {saving ? <Loader2 size={16} className="spin" /> : <ArrowUpCircle size={16} />} {editing ? 'Save upgrade' : 'Upgrade for free'}
+        </button>
+      </form>
+    </Sheet>
+  );
+}
+
+// Upgrades given on this order, with edit / remove while still allowed.
+function UpgradeList({ row, onUpgrade }) {
+  const upgrades = Array.isArray(row.order?.upgrades) ? row.order.upgrades : [];
+  const allowed = canUpgradeOrder(row.orderStatus);
+  const [busyId, setBusyId] = useState(null);
+  if (upgrades.length === 0 && !allowed) return null;
+
+  const remove = async (u) => {
+    if (!window.confirm(`Remove upgrade "${u.count} → ${u.toService}"?`)) return;
+    setBusyId(u.id);
+    try { await upgradeB2cOrder(row.id, 'remove', { id: u.id }); } catch (err) { alert(err.message); }
+    setBusyId(null);
+  };
+
+  return (
+    <div className="ops-upgrades" style={{ margin: '10px 0', padding: '10px 12px', borderRadius: 12, background: '#f5f3ff', border: '1px solid #ddd6fe' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <strong style={{ color: '#5b21b6', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <ArrowUpCircle size={15} /> Upgrades {upgrades.length > 0 && `(${upgrades.length})`}
+        </strong>
+        {allowed ? (
+          <button type="button" className="chip" onClick={() => onUpgrade(row, null)}>
+            <Plus size={12} /> Upgrade services
+          </button>
+        ) : (
+          <span className="ops-muted" style={{ fontSize: 12 }}>Allowed only after pickup, before processing</span>
+        )}
+      </div>
+      {upgrades.map((u) => (
+        <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, fontSize: 13 }}>
+          <span style={{ flex: 1 }}>
+            <strong>{u.count}{u.itemType ? ` ${u.itemType}` : ' clothes'}</strong>: {u.fromService} → <strong>{u.toService}</strong>
+            {u.note && <span className="ops-muted"> · {u.note}</span>}
+            <span className="ops-muted"> · {u.seenByUser ? 'seen' : 'not seen yet'}</span>
+          </span>
+          {allowed && (
+            <>
+              <button type="button" className="icon-btn" title="Edit" onClick={() => onUpgrade(row, u)}><Pencil size={13} /></button>
+              <button type="button" className="icon-btn" title="Remove" disabled={busyId === u.id} onClick={() => remove(u)}>
+                {busyId === u.id ? <Loader2 size={13} className="spin" /> : <Trash2 size={13} />}
+              </button>
+            </>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function OrderRow({ row, highlight, isJustEdited, onEdit, onCancel, onEditPayment, onUpgrade }) {
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -455,6 +580,9 @@ function OrderRow({ row, highlight, isJustEdited, onEdit, onCancel, onEditPaymen
         </tbody>
       </table>
 
+      {/* 5b. Free service upgrades */}
+      <UpgradeList row={row} onUpgrade={onUpgrade} />
+
       {/* 6. Payment Status and Edit Action */}
       <div className="ops-payment-wrap">
         <div className="ops-payment-info">
@@ -500,6 +628,7 @@ export default function B2CTab({ rows, focusId, range, addingWalkIn = false, onA
   const [leadFilter, setLeadFilter] = useState('all');
   const [editing, setEditing] = useState(null);
   const [editingPayment, setEditingPayment] = useState(null);
+  const [upgrading, setUpgrading] = useState(null); // { row, upgrade|null }
   const [cancelling, setCancelling] = useState(null);
   const [lastEditedId, setLastEditedId] = useState(null);
   const [pricesCatalog, setPricesCatalog] = useState({});
@@ -672,6 +801,7 @@ export default function B2CTab({ rows, focusId, range, addingWalkIn = false, onA
               onEdit={setEditing}
               onCancel={setCancelling}
               onEditPayment={setEditingPayment}
+              onUpgrade={(row, upgrade) => setUpgrading({ id: row.id, upgrade })}
             />
           ))}
         </div>
@@ -683,6 +813,14 @@ export default function B2CTab({ rows, focusId, range, addingWalkIn = false, onA
           pricesCatalog={pricesCatalog}
           onSaved={(id) => setLastEditedId(id)}
           onClose={() => setEditing(null)}
+        />
+      )}
+      {upgrading && rows.find((r) => r.id === upgrading.id) && (
+        <UpgradeSheet
+          row={rows.find((r) => r.id === upgrading.id)}
+          editing={upgrading.upgrade}
+          pricesCatalog={pricesCatalog}
+          onClose={() => setUpgrading(null)}
         />
       )}
       {liveEditingPayment && <EditPaymentSheet row={liveEditingPayment} onClose={() => setEditingPayment(null)} />}

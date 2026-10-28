@@ -17,6 +17,7 @@ import {
   Timestamp,
   runTransaction,
   arrayRemove,
+  arrayUnion,
 } from 'firebase/firestore';
 import {
   getAuth,
@@ -26,6 +27,7 @@ import {
   setPersistence,
   browserSessionPersistence,
 } from 'firebase/auth';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import {
   getStorage,
   ref,
@@ -47,6 +49,7 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 export const auth = getAuth(app);
 export const storage = getStorage(app);
+const functions = getFunctions(app, 'us-central1');
 
 /** Upload a B2B order photo (challan/clothes) to Firebase Storage */
 export async function uploadB2bPhoto(file, folder = 'manager_b2b_photos') {
@@ -267,6 +270,27 @@ export async function saveB2cVerification(row, action, { lines, reason = '', cha
       }
     }
   });
+}
+
+/** Statuses from pickup until processing starts (mirrors the server). */
+export const UPGRADABLE_STATUSES = ['order picked up', 'picked up', 'picked_up', 'reached laundry facility', 'reached_laundry'];
+
+export const canUpgradeOrder = (orderStatus) =>
+  UPGRADABLE_STATUSES.includes(String(orderStatus || '').toLowerCase().trim());
+
+/**
+ * Free service upgrade on a B2C order (managerUpgradeOrder callable): the
+ * bill does not change; the customer gets a push and a pop-up.
+ * op: 'add' | 'edit' | 'remove'. upgrade: { count, fromService, toService, itemType?, note? }
+ */
+export async function upgradeB2cOrder(orderId, op, { id, upgrade } = {}) {
+  await httpsCallable(functions, 'managerUpgradeOrder')({ orderId, op, id, upgrade });
+  const describe = (u) => u ? `${u.count}${u.itemType ? ` ${u.itemType}` : ''}: ${u.fromService} → ${u.toService}` : '';
+  await setDoc(doc(verCol, orderId), {
+    history: arrayUnion(historyEntry(`upgrade_${op}`, describe(upgrade) || 'Upgrade removed')),
+    updatedAt: serverTimestamp(),
+    updatedBy: actor(),
+  }, { merge: true });
 }
 
 /**
