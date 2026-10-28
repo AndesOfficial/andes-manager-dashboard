@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Search, Loader2, CreditCard, AlertTriangle, Pencil, CheckCircle2, X,
-  Copy, Check, Phone, Calendar, Clock, Sparkles, Bike, Plus, ArrowUpCircle, Trash2
+  Copy, Check, Phone, Calendar, Clock, Sparkles, Bike, Plus, ArrowUpCircle, Trash2, Zap
 } from 'lucide-react';
-import { saveB2cVerification, updateB2cPayment, fetchPricesCatalog, upgradeB2cOrder, canUpgradeOrder } from '../../firebase';
+import { saveB2cVerification, updateB2cPayment, fetchPricesCatalog, upgradeB2cOrder, canUpgradeOrder, setB2cPriority } from '../../firebase';
 import { SERVICE_GROUPS, diffLines, num, round1, LEAD_SOURCE_TYPES, calculateB2cPrice } from '../../lib/orders';
 import {
   fmtKg, fmtDay, EmptyState, Sheet, StatusBadge, RowActions, ReasonSheet, HistoryList,
@@ -420,6 +420,33 @@ function UpgradeList({ row, onUpgrade }) {
   );
 }
 
+const isClosedOrder = (status) => /deliver|complete|cancel/i.test(String(status || ''));
+
+// Priority: rider app serves it first; the customer sees a pop-up and badge.
+function PriorityToggle({ row }) {
+  const [busy, setBusy] = useState(false);
+  const on = row.order?.priority === 'high';
+  if (!on && isClosedOrder(row.orderStatus)) return null;
+  const toggle = async () => {
+    if (!on && !window.confirm('Mark this order as priority? The customer and rider will be notified.')) return;
+    setBusy(true);
+    try { await setB2cPriority(row.id, !on); } catch (err) { alert(err.message); }
+    setBusy(false);
+  };
+  return (
+    <button
+      type="button"
+      className="chip"
+      disabled={busy}
+      onClick={toggle}
+      title={on ? 'Remove priority' : 'Mark as priority'}
+      style={on ? { background: '#fef3c7', borderColor: '#f59e0b', color: '#92400e', fontWeight: 700 } : undefined}
+    >
+      {busy ? <Loader2 size={12} className="spin" /> : <Zap size={12} />} {on ? 'Priority ✓' : 'Mark priority'}
+    </button>
+  );
+}
+
 function OrderRow({ row, highlight, isJustEdited, onEdit, onCancel, onEditPayment, onUpgrade }) {
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -449,6 +476,7 @@ function OrderRow({ row, highlight, isJustEdited, onEdit, onCancel, onEditPaymen
             {orderNumber}
             {copied ? <Check size={12} color="#16a34a" /> : <Copy size={12} style={{ opacity: 0.6 }} />}
           </button>
+          <PriorityToggle row={row} />
           {row.orderStatus && (
             <span className="b2c-order-status-badge">
               {row.orderStatus}

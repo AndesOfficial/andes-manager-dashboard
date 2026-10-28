@@ -272,6 +272,20 @@ export async function saveB2cVerification(row, action, { lines, reason = '', cha
   });
 }
 
+/**
+ * Marks / unmarks a B2C order as priority (adminSetOrderPriority callable):
+ * the rider app shows it first, the customer gets a push and a pop-up.
+ * Only open pickups and drops (server checks).
+ */
+export async function setB2cPriority(orderId, on) {
+  await httpsCallable(functions, 'adminSetOrderPriority')({ orderId, priority: on });
+  await setDoc(doc(verCol, orderId), {
+    history: arrayUnion(historyEntry(on ? 'priority_on' : 'priority_off', on ? 'Marked priority' : 'Priority removed')),
+    updatedAt: serverTimestamp(),
+    updatedBy: actor(),
+  }, { merge: true });
+}
+
 /** Statuses from pickup until processing starts (mirrors the server). */
 export const UPGRADABLE_STATUSES = ['order picked up', 'picked up', 'picked_up', 'reached laundry facility', 'reached_laundry'];
 
