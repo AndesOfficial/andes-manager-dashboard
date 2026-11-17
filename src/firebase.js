@@ -193,6 +193,8 @@ export async function saveB2cVerification(row, action, { lines, reason = '', cha
   await runTransaction(db, async (tx) => {
     const snap = await tx.get(ref);
     const cur = snap.exists() ? snap.data() : {};
+    // All reads must happen before any write in a Firestore transaction.
+    const cartSnap = (action === 'edit' || action === 'verify') ? await tx.get(cartRef) : null;
 
     const status = action === 'cancel' ? 'cancelled' : action === 'restore' ? 'pending' : 'verified';
     const activeLines = lines || cur.lines || row.rider || [];
@@ -229,8 +231,7 @@ export async function saveB2cVerification(row, action, { lines, reason = '', cha
 
     // When manager edits or verifies weights/lines, sync to cartdetails
     if (action === 'edit' || action === 'verify') {
-      const cartSnap = await tx.get(cartRef);
-      if (cartSnap.exists()) {
+      if (cartSnap && cartSnap.exists()) {
         const cartData = cartSnap.data();
         const existingPerKg = cartData.perKgDetails || {};
         const updatedPerKg = { ...existingPerKg };
