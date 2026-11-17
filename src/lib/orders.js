@@ -365,6 +365,8 @@ export function isOrderDelivered(status) {
  * Calculates how many days an active order is delayed past its scheduled date.
  * Returns 0 if already delivered/completed or not yet overdue.
  */
+const DELAYED_CLEARED_BEFORE = '2026-11-17';
+
 export function getOrderDelay(order, referenceDay = istDay(new Date())) {
   if (!order || isOrderDelivered(order.status)) return 0;
 
@@ -374,6 +376,9 @@ export function getOrderDelay(order, referenceDay = istDay(new Date())) {
   if (!targetDay) return 0;
 
   if (targetDay >= referenceDay) return 0;
+  // Backlog cleared on 2026-11-17: orders due before this day are no longer
+  // flagged as delayed. Order status is untouched.
+  if (targetDay < DELAYED_CLEARED_BEFORE) return 0;
 
   const targetMs = new Date(`${targetDay}T12:00:00+05:30`).getTime();
   const refMs = new Date(`${referenceDay}T12:00:00+05:30`).getTime();
