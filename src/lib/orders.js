@@ -586,8 +586,21 @@ export function calculateB2cPrice(order, lines, pricesCatalog = {}) {
   let perPieceSubtotal = 0;
   const items = [];
 
+  // The rider records a weight for every item, including ones that are sold by
+  // the piece (Kurta ₹49, Blanket ₹80). Those must stay per-piece: the order's
+  // own bill says which items are per-piece, so trust it over the weight.
+  const billedByPiece = new Set(
+    (order.breakdown?.perPiece?.items || []).map((it) => cleanName(it.name).toLowerCase())
+  );
+  const billedByKg = new Set(
+    (order.breakdown?.perKg?.items || []).map((it) => cleanName(it.name).toLowerCase())
+  );
+
   for (const l of lines) {
-    const isKg = l.group === 'wash_fold' || l.group === 'wash_iron' || num(l.kg) > 0;
+    const lineKey = cleanName(l.name).toLowerCase();
+    const isKg = l.group === 'wash_fold' || l.group === 'wash_iron' ||
+      billedByKg.has(lineKey) ||
+      (num(l.kg) > 0 && !billedByPiece.has(lineKey));
     if (isKg) {
       const wt = round1(l.kg);
       let rate = perKgRate;
