@@ -598,9 +598,9 @@ export function calculateB2cPrice(order, lines, pricesCatalog = {}) {
 
   for (const l of lines) {
     const lineKey = cleanName(l.name).toLowerCase();
+    // Weight alone never makes an item per-kg: only per-kg services use it.
     const isKg = l.group === 'wash_fold' || l.group === 'wash_iron' ||
-      billedByKg.has(lineKey) ||
-      (num(l.kg) > 0 && !billedByPiece.has(lineKey));
+      billedByKg.has(lineKey);
     if (isKg) {
       const wt = round1(l.kg);
       let rate = perKgRate;
