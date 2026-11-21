@@ -239,6 +239,12 @@ function EditSheet({ row, onClose, pricesCatalog = {}, onSaved }) {
               <span>-₹{priceInfo.discounts}</span>
             </div>
           )}
+          {priceInfo.subscriptionDiscount > 0 && (
+            <div className="b2c-price-calc-row" style={{ color: '#7c3aed' }}>
+              <span>Subscription plan covers:</span>
+              <span>-₹{priceInfo.subscriptionDiscount}</span>
+            </div>
+          )}
           <div className="b2c-price-calc-total">
             <span>Calculated Total:</span>
             <span style={{ fontSize: 17, color: '#047857' }}>

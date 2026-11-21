@@ -547,6 +547,68 @@ function campaignFreeUnits(order) {
   return free;
 }
 
+// ── Subscription cover ──────────────────────────────────────────────────────
+// Same rules as the server bill (rider functions, subscription_cover.ts): the
+// plan pays for its kg service and its piece services, up to what was left for
+// this order; Instant / Premium lines and other services cost the normal price.
+// The server's bill (breakdown.subscription) says what this order may use:
+// what it covered plus what is left after it.
+const SUB_PIECE_KEYS = ['iron', 'dry_cleaning', 'shoe_cleaning'];
+const subBase = (name) => String(name || '').toLowerCase()
+  .replace(/_(regular)$/i, '').replace(/\s*\([^)]*\)\s*$/, '').replace(/_/g, ' ')
+  .replace(/\s+and\s+/g, ' & ').replace(/\s+/g, ' ').trim();
+const subExpress = (name) => /_(instant|premium)$/i.test(String(name || '').trim());
+function subKgKey(name) {
+  if (subExpress(name)) return null;
+  const n = subBase(name);
+  if (n === 'wash & iron' || n === 'wash iron') return 'wash_iron';
+  if (n === 'wash & fold' || n === 'wash fold') return 'wash_fold';
+  return null;
+}
+function subPieceKey(name, category) {
+  if (subExpress(name) || subKgKey(name)) return null;
+  const cat = String(category || '').trim().toLowerCase();
+  if (cat === 'dry cleaning' || cat === 'dry_cleaning' || cat === 'drycleaning') return 'dry_cleaning';
+  if (cat === 'shoes' || cat === 'footwear') return 'shoe_cleaning';
+  return /\biron(ing)?\b|\bpress(ing)?\b/.test(subBase(name)) ? 'iron' : null;
+}
+
+/** ₹ the subscription covers on these (edited) lines; 0 for other orders. */
+export function subscriptionCoverDiscount(order, items, pricesCatalog = {}) {
+  const sub = order?.breakdown?.subscription;
+  if (!sub || typeof sub !== 'object') return 0;
+  const itemsTotal = items.reduce((s, it) => s + (Number(it.amount) || 0), 0);
+  // Cover recorded under an earlier subscription: keep it, capped at the bill.
+  if (!sub.kgService && sub.kgLeft == null) return Math.min(num(sub.discount), itemsTotal);
+
+  let kgLeft = num(sub.coveredKg) + num(sub.kgLeft);
+  const piecesLeft = {};
+  for (const k of SUB_PIECE_KEYS) {
+    piecesLeft[k] = num(sub.coveredPieces?.[k]) + num(sub.piecesLeft?.[k]);
+  }
+  let discount = 0;
+  for (const it of items) {
+    const amount = Number(it.amount) || 0;
+    if (amount <= 0) continue;
+    if (it.isKg) {
+      const weight = Number(it.weight) || 0;
+      if (kgLeft <= 0 || weight <= 0 || sub.kind === 'piece' || subKgKey(it.name) !== (sub.kgService || 'wash_iron')) continue;
+      const covered = Math.min(kgLeft, weight);
+      kgLeft -= covered;
+      discount += Math.min(amount, (amount / weight) * covered);
+    } else {
+      const pDoc = pricesCatalog[cleanName(it.name).toLowerCase()] || pricesCatalog[String(it.name).toLowerCase()];
+      const key = subPieceKey(it.name, pDoc?.category);
+      const qty = Math.floor(Number(it.qty) || 0);
+      if (!key || !(piecesLeft[key] > 0) || qty <= 0) continue;
+      const covered = Math.min(piecesLeft[key], qty);
+      piecesLeft[key] -= covered;
+      discount += Math.min(amount, (amount / qty) * covered);
+    }
+  }
+  return Math.round(discount);
+}
+
 export function calculateB2cPrice(order, lines, pricesCatalog = {}) {
   if (!order) return { subtotal: 0, total: 0, perKgRate: 79, items: [] };
   const campaignFree = campaignFreeUnits(order);
@@ -639,8 +701,9 @@ export function calculateB2cPrice(order, lines, pricesCatalog = {}) {
   const couponDiscount = num(order.couponDiscount ?? order.coupon_discount);
   const promotionDiscount = num(order.promotionDiscount ?? order.promoDiscount);
   const walletAmountUsed = num(order.walletAmountUsed);
+  const subscriptionDiscount = subscriptionCoverDiscount(order, items, pricesCatalog);
 
-  const total = Math.max(0, Math.round(subtotal + deliveryCharge + convenienceFee - couponDiscount - promotionDiscount - walletAmountUsed));
+  const total = Math.max(0, Math.round(subtotal + deliveryCharge + convenienceFee - couponDiscount - promotionDiscount - walletAmountUsed - subscriptionDiscount));
 
   return {
     subtotal,
@@ -651,6 +714,8 @@ export function calculateB2cPrice(order, lines, pricesCatalog = {}) {
     deliveryCharge,
     convenienceFee,
     discounts: couponDiscount + promotionDiscount + walletAmountUsed,
+    // What the customer's subscription plan pays for (taken off the total).
+    subscriptionDiscount,
     // Already ₹0 inside the subtotals; for display.
     campaignDiscount,
     campaignLabel: campaignDiscount > 0 ? (order.campaign?.campaignName || 'Offer') : null,
