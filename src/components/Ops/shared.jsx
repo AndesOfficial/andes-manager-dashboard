@@ -68,7 +68,7 @@ const PRESETS = [
 export const rangeLabel = ({ from, to }) => (from === to ? fmtDay(from) : `${fmtDay(from)} – ${fmtDay(to)}`);
 
 /** From–to range for the whole dashboard, with quick presets. */
-export function RangeBar({ range, onChange }) {
+export function RangeBar({ range, onChange, hideDates = false }) {
   const active = PRESETS.find((p) => { const r = p.range(); return r.from === range.from && r.to === range.to; });
   const set = (from, to) => onChange(from <= to ? { from, to } : { from: to, to: from });
   return (
@@ -78,14 +78,14 @@ export function RangeBar({ range, onChange }) {
           <button key={p.id} className={`chip ${active?.id === p.id ? 'chip-active' : ''}`} onClick={() => onChange(p.range())}>{p.label}</button>
         ))}
       </div>
-      <div className="range-inputs">
+      {!hideDates && <div className="range-inputs">
         <label><span>From</span>
           <input className="form-input" type="date" value={range.from} max={todayStr()} onChange={(e) => e.target.value && set(e.target.value, range.to)} />
         </label>
         <label><span>To</span>
           <input className="form-input" type="date" value={range.to} max={todayStr()} onChange={(e) => e.target.value && set(range.from, e.target.value)} />
         </label>
-      </div>
+      </div>}
     </div>
   );
 }

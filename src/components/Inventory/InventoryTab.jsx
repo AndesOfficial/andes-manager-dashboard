@@ -23,24 +23,6 @@ const shiftDate = (dateStr, days) => {
   const nd = String(dt.getDate()).padStart(2, '0');
   return `${ny}-${nm}-${nd}`;
 };
-const isWednesday = (dStr) => {
-  if (!dStr) return false;
-  const [y, m, d] = String(dStr).slice(0, 10).split('-').map(Number);
-  if (!y || !m || !d) return false;
-  // Day 3 is Wednesday (0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat) in all timezones
-  return new Date(y, m - 1, d, 12, 0, 0).getDay() === 3;
-};
-const getLastWednesday = (dStr) => {
-  const [y, m, d] = String(dStr || todayStr()).slice(0, 10).split('-').map(Number);
-  const cur = new Date(y, m - 1, d, 12, 0, 0);
-  const day = cur.getDay();
-  const diff = (day - 3 + 7) % 7;
-  const target = new Date(cur.getTime() - (diff === 0 ? 0 : diff) * 86400000);
-  const ty = target.getFullYear();
-  const tm = String(target.getMonth() + 1).padStart(2, '0');
-  const td = String(target.getDate()).padStart(2, '0');
-  return `${ty}-${tm}-${td}`;
-};
 const isBlank = (v) => v === '' || v === null || v === undefined;
 const num = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
 const round = (n) => Math.round(n * 100) / 100;
@@ -293,7 +275,6 @@ export default function InventoryTab() {
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState(null);
-  const [showWeeklyOverride, setShowWeeklyOverride] = useState(false);
 
   useEffect(() => subscribeInventoryLogs(
     (list) => { setLogs(list); setLoading(false); },
@@ -338,19 +319,8 @@ export default function InventoryTab() {
     setDate(d);
   };
 
-  const wednesday = isWednesday(date);
-  const showWeekly = wednesday || showWeeklyOverride;
-
-  // Visible stock sections based on Wednesday rule
-  const visibleStockSections = useMemo(() => {
-    if (showWeekly) {
-      return [
-        ...STOCK_SECTIONS.filter((s) => s.key === 'packaging' || s.key === 'other'),
-        ...STOCK_SECTIONS.filter((s) => s.key === 'chemicals' || s.key === 'stainRemovers'),
-      ];
-    }
-    return STOCK_SECTIONS.filter((s) => s.key === 'chemicals' || s.key === 'stainRemovers');
-  }, [showWeekly]);
+  // Stock sections shown: chemicals and stain removers.
+  const visibleStockSections = STOCK_SECTIONS.filter((s) => s.key === 'chemicals' || s.key === 'stainRemovers');
 
   /* summary numbers */
   const lowItems = [];
@@ -447,11 +417,9 @@ export default function InventoryTab() {
   }
 
   const isToday = date === todayStr();
-  const lastWed = getLastWednesday(date);
 
   // Jump chips matching the required order
   const chips = [
-    ...(showWeekly ? [['packaging', 'Packaging'], ['other', 'Other things']] : []),
     ['chemicals', 'Chemicals'],
     ['stainRemovers', 'Stain removers'],
     ['electricity', 'Electricity'],
@@ -469,18 +437,6 @@ export default function InventoryTab() {
           <input className="form-input inv-date" type="date" value={date} max={todayStr()} onChange={(e) => changeDate(e.target.value)} />
           <button className="icon-btn" onClick={() => changeDate(shiftDate(date, 1))} disabled={isToday} title="Next day"><ChevronRight size={18} /></button>
           {!isToday && <button className="chip" onClick={() => changeDate(todayStr())}>Today</button>}
-          {wednesday ? (
-            <span className="badge badge-blue">Wednesday (Weekly Packaging Active)</span>
-          ) : (
-            <>
-              <button type="button" className="chip" onClick={() => changeDate(lastWed)} title="Jump to previous Wednesday">
-                Go to Wednesday ({fmtRowDate(lastWed)})
-              </button>
-              <button type="button" className="chip" onClick={() => setShowWeeklyOverride(!showWeeklyOverride)}>
-                {showWeeklyOverride ? 'Hide weekly packaging' : 'Show weekly packaging'}
-              </button>
-            </>
-          )}
         </div>
         <div className="inv-save-wrap" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {dirty
@@ -521,32 +477,7 @@ export default function InventoryTab() {
         {chips.map(([k, l]) => <button key={k} className="chip" onClick={() => jump(k)}>{l}</button>)}
       </div>
 
-      {/* DISPLAY ORDER:
-          On Wednesday (or when viewing weekly items):
-          1. Packaging
-          2. Other things
-          3. Chemicals
-          4. Stain removers
-          5. Electricity
-          6. Cleanliness log
-          7. Jute bag
-
-          On other days:
-          1. Chemicals
-          2. Stain removers
-          3. Electricity
-          4. Cleanliness log
-          5. Jute bag
-      */}
-
-      {/* 1. On Wednesday (or toggle): Packaging and Other things at the very top */}
-      {showWeekly && STOCK_SECTIONS.filter((s) => s.key === 'packaging' || s.key === 'other').map((s) => (
-        <StockSection key={s.key} section={s} rows={log[s.key]} openings={openings[s.key]} date={date}
-          inputRemainingMode={false}
-          onChange={(item, patch) => edit((l) => { Object.assign(l[s.key][item], patch); return l; })} />
-      ))}
-
-      {/* 2. Chemicals & Stain removers (Manager enters remaining, used is auto-calculated) */}
+      {/* Chemicals & Stain removers (Manager enters remaining, used is auto-calculated) */}
       {STOCK_SECTIONS.filter((s) => s.key === 'chemicals' || s.key === 'stainRemovers').map((s) => (
         <StockSection key={s.key} section={s} rows={log[s.key]} openings={openings[s.key]} date={date}
           inputRemainingMode={true}

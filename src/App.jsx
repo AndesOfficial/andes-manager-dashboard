@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Plus, Loader2, Home, Users, LogOut, Boxes, LayoutDashboard, Building2, Archive, AlertCircle,
+  Plus, Loader2, Users, LogOut, Boxes, LayoutDashboard, Building2, Archive, AlertCircle,
 } from 'lucide-react';
 import InventoryTab from './components/Inventory/InventoryTab';
 import OverviewTab from './components/Ops/OverviewTab';
@@ -36,7 +36,6 @@ export default function App() {
   const [adding, setAdding] = useState(false);
   const [addingWalkIn, setAddingWalkIn] = useState(false);
   const [hostels, setHostels] = useState([]);
-  const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
@@ -44,15 +43,6 @@ export default function App() {
   const isAdmin = user && isAllowedUser(user);
   const canUseApp = !!(isAdmin || (user && isManagerUser(user)));
   const data = useRangeData(range, canUseApp);
-
-  /* network listener */
-  useEffect(() => {
-    const on = () => setIsOnline(true);
-    const off = () => setIsOnline(false);
-    window.addEventListener('online', on);
-    window.addEventListener('offline', off);
-    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
-  }, []);
 
   /* auth listener */
   useEffect(() => subscribeAuth((u) => {
@@ -135,8 +125,6 @@ export default function App() {
 
   const current = TABS.find((t) => t.id === tab);
   const isDayTab = DAY_TABS.includes(tab);
-  const toVerify = data.b2cRows.filter((r) => r.status === 'pending' || r.status === 'changed').length
-    + data.b2bEntries.filter((e) => e.status === 'pending').length;
   const addButton = tab === 'b2b' ? (
     <button className="btn-action-primary" onClick={() => setAdding(true)}>
       <Plus size={16} /><span>Add B2B entry</span>
@@ -154,11 +142,7 @@ export default function App() {
       <aside className="sidebar">
         <div className="sidebar-top">
           <div className="sidebar-brand">
-            <div className="sidebar-logo"><Home size={20} color="#fff" /></div>
-            <div>
-              <div className="sidebar-title">Andes</div>
-              <div className="sidebar-subtitle">Manager Portal</div>
-            </div>
+            <img className="sidebar-logo-img" src="/andes-logo.png" alt="Andes" />
           </div>
 
           <nav className="sidebar-menu">
@@ -172,29 +156,10 @@ export default function App() {
         </div>
 
         <div className="sidebar-profile">
-          <div style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-              <div className="profile-info">
-                <span className="profile-name">{isAdmin ? 'Admin' : 'Manager'}</span>
-                <span className="profile-role">{user.email}</span>
-              </div>
-              <button className="icon-btn" style={{ background: 'transparent', border: 'none', color: '#94a3b8' }} onClick={handleSignOut} title="Sign out">
-                <LogOut size={18} />
-              </button>
-            </div>
-            <div className="profile-info" style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 }}>
-              <span style={{
-                width: 6,
-                height: 6,
-                borderRadius: '50%',
-                background: isOnline ? 'var(--green)' : 'var(--red)',
-                boxShadow: isOnline ? '0 0 8px var(--green)' : '0 0 8px var(--red)'
-              }} />
-              <span style={{ fontSize: 9, color: '#94a3b8', fontWeight: 700, letterSpacing: '0.05em' }}>
-                {isOnline ? 'ONLINE' : 'OFFLINE'}
-              </span>
-            </div>
-          </div>
+          <button className="menu-item" onClick={handleSignOut} title="Sign out">
+            <LogOut size={18} />
+            <span>Sign out</span>
+          </button>
         </div>
       </aside>
 
@@ -202,6 +167,7 @@ export default function App() {
       <main className="main-area">
 
         {/* Desktop Header */}
+        {tab !== 'overview' && (
         <header className="main-header">
           <div className="main-title-wrap">
             <h1>{current.title}</h1>
@@ -212,15 +178,12 @@ export default function App() {
           </div>
           <div className="header-actions">{addButton}</div>
         </header>
+        )}
 
         {/* Mobile Header (Hidden on Desktop) */}
         <div className="mobile-topbar">
           <div className="brand">
-            <div className="brand-badge"><Home size={17} color="#fff" /></div>
-            <div>
-              <div className="brand-name">Andes {isAdmin && <span className="admin-pill" style={{ fontSize: 9, background: '#2563eb', color: '#fff', padding: '2px 6px', borderRadius: 4, marginLeft: 6, fontWeight: 700, textTransform: 'uppercase' }}>Admin</span>}</div>
-              <div className="brand-sub">{isDayTab ? `${toVerify} to verify` : current.title}</div>
-            </div>
+            <img className="sidebar-logo-img" src="/andes-logo.png" alt="Andes" style={{ width: 110 }} />
           </div>
           <button className="icon-btn" onClick={handleSignOut} title="Sign out"><LogOut size={16} /></button>
         </div>
@@ -235,7 +198,7 @@ export default function App() {
         {/* Active Tab Panel */}
         <div className="tab-content-panel">
           <ErrorBoundary key={tab}>
-            {isDayTab && <RangeBar range={range} onChange={(r) => { setRange(r); setFocusId(null); }} />}
+            {isDayTab && <RangeBar range={range} hideDates={tab === 'overview'} onChange={(r) => { setRange(r); setFocusId(null); }} />}
             {isDayTab && data.error && <div className="form-error" style={{ marginBottom: 12 }}>{data.error}</div>}
             {isDayTab && data.loading ? (
               <div className="loading-state"><Loader2 size={22} className="spin" /><span>Loading {rangeLabel(range)}…</span></div>
