@@ -186,7 +186,7 @@ export default function App() {
         {/* Mobile Header (Hidden on Desktop) */}
         <div className="mobile-topbar">
           <div className="brand">
-            <img className="sidebar-logo-img" src="/andes-logo.png" alt="Andes" style={{ width: 38 }} />
+            <img className="sidebar-logo-img" src="/andes-logo.png" alt="Andes" style={{ width: 36, height: 36 }} />
           </div>
           <button className="icon-btn" onClick={handleSignOut} title="Sign out"><LogOut size={16} /></button>
         </div>
