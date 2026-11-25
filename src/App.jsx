@@ -126,6 +126,8 @@ export default function App() {
 
   const current = TABS.find((t) => t.id === tab);
   const isDayTab = DAY_TABS.includes(tab);
+  const toVerify = data.b2cRows.filter((r) => r.status === 'pending' || r.status === 'changed').length
+    + data.b2bEntries.filter((e) => e.status === 'pending').length;
   const addButton = tab === 'b2b' ? (
     <button className="btn-action-primary" onClick={() => setAdding(true)}>
       <Plus size={16} /><span>Add B2B entry</span>
