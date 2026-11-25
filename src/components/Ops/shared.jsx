@@ -125,6 +125,10 @@ export const STATUS_FILTERS = [
   { id: 'all', label: 'All' },
   { id: 'todo', label: 'To verify' },
   { id: 'delayed', label: 'Delayed' },
+  { id: 'awaiting', label: 'Awaiting receipt' },
+  { id: 'bagdiff', label: 'Bag difference' },
+  { id: 'pickedup', label: 'Picked up' },
+  { id: 'delivered', label: 'Delivered' },
   { id: 'verified', label: 'Verified' },
   { id: 'cancelled', label: 'Cancelled' },
 ];
@@ -163,6 +167,11 @@ export const matchesFilter = (rowOrStatus, filter, keepRowId = null) => {
   if (filter === 'todo') {
     return status === 'pending' || status === 'changed';
   }
+
+  if (filter === 'awaiting') return !!(isObject && rowOrStatus.receiptState === 'pending');
+  if (filter === 'bagdiff') return !!(isObject && (rowOrStatus.receiptState === 'short' || rowOrStatus.receiptState === 'extra'));
+  if (filter === 'pickedup') return !!(isObject && rowOrStatus.pickedUp);
+  if (filter === 'delivered') return !!(isObject && rowOrStatus.isDelivered);
 
   return status === filter;
 };

@@ -3,7 +3,7 @@ import {
   Search, Loader2, CreditCard, AlertTriangle, Pencil, CheckCircle2, X,
   Copy, Check, Phone, Calendar, Clock, Sparkles, Bike, Plus, ArrowUpCircle, Trash2, Zap
 } from 'lucide-react';
-import { saveB2cVerification, updateB2cPayment, fetchPricesCatalog, upgradeB2cOrder, canUpgradeOrder, setB2cPriority } from '../../firebase';
+import { saveB2cVerification, saveStoreReceipt, updateB2cPayment, fetchPricesCatalog, upgradeB2cOrder, canUpgradeOrder, setB2cPriority } from '../../firebase';
 import { SERVICE_GROUPS, diffLines, num, round1, LEAD_SOURCE_TYPES, calculateB2cPrice } from '../../lib/orders';
 import {
   fmtKg, fmtDay, EmptyState, Sheet, StatusBadge, RowActions, ReasonSheet, HistoryList,
@@ -429,6 +429,64 @@ function UpgradeList({ row, onUpgrade }) {
 const isClosedOrder = (status) => /deliver|complete|cancel/i.test(String(status || ''));
 
 // Priority: rider app serves it first; the customer sees a pop-up and badge.
+/** Rider's bag count against the store's, with one button to confirm receipt. */
+function ReceiptStrip({ row }) {
+  const [open, setOpen] = useState(false);
+  const [bags, setBags] = useState('');
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  if (!row.pickedUp) return null;
+
+  const stateText = {
+    pending: 'Picked up · Store confirmation pending',
+    ok: 'Received at store',
+    short: `${Math.abs(row.bagDiff)} bag${Math.abs(row.bagDiff) === 1 ? '' : 's'} missing`,
+    extra: `${row.bagDiff} extra bag${row.bagDiff === 1 ? '' : 's'} at store`,
+  }[row.receiptState];
+  const tone = row.receiptState === 'ok' ? 'badge-green' : row.receiptState === 'pending' ? 'badge-amber' : 'badge-red';
+  const changing = !!row.receipt;
+
+  const start = () => { setBags(row.receipt ? String(row.receipt.bags) : String(row.pickedBags || '')); setReason(''); setError(''); setOpen(true); };
+  const save = async () => {
+    setBusy(true); setError('');
+    try { await saveStoreReceipt(row, bags, reason); setOpen(false); } catch (err) { setError(err.message); }
+    setBusy(false);
+  };
+
+  return (
+    <div className="ops-receipt">
+      <div className="ops-receipt-line">
+        <span className={`badge ${tone}`}>{stateText}</span>
+        <span className="ops-muted">
+          Rider: <strong>{row.pickedBags || '—'}</strong> bag{row.pickedBags === 1 ? '' : 's'}
+          {row.receipt && <> · Store: <strong>{row.receipt.bags}</strong></>}
+          {row.receipt?.by && <> · confirmed by {row.receipt.by}</>}
+        </span>
+        {!open && (
+          <button type="button" className="btn-ghost" style={{ marginLeft: 'auto' }} onClick={start}>
+            {changing ? 'Change count' : 'Confirm received'}
+          </button>
+        )}
+      </div>
+      {open && (
+        <div className="ops-receipt-form">
+          <label className="ops-muted" style={{ fontSize: 12 }}>Bags received at the store</label>
+          <input className="form-input" type="number" min="0" max="50" value={bags} onChange={(e) => setBags(e.target.value)} style={{ width: 100 }} />
+          {changing && (
+            <input className="form-input" placeholder="Why is the count changing?" value={reason} onChange={(e) => setReason(e.target.value)} />
+          )}
+          {error && <div className="form-error">{error}</div>}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="button" className="btn-action-primary" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Confirm received'}</button>
+            <button type="button" className="btn-ghost" onClick={() => setOpen(false)}>Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PriorityToggle({ row }) {
   const [busy, setBusy] = useState(false);
   const on = row.order?.priority === 'high';
@@ -617,6 +675,9 @@ function OrderRow({ row, highlight, isJustEdited, onEdit, onCancel, onEditPaymen
       {/* 5b. Free service upgrades */}
       <UpgradeList row={row} onUpgrade={onUpgrade} />
 
+      {/* 5c. Pickup -> store receipt */}
+      <ReceiptStrip row={row} />
+
       {/* 6. Payment Status and Edit Action */}
       <div className="ops-payment-wrap">
         <div className="ops-payment-info">
@@ -661,9 +722,9 @@ function OrderRow({ row, highlight, isJustEdited, onEdit, onCancel, onEditPaymen
   );
 }
 
-export default function B2CTab({ rows, focusId, range, addingWalkIn = false, onAddWalkInClose }) {
+export default function B2CTab({ rows, focusId, range, initialFilter = 'all', addingWalkIn = false, onAddWalkInClose }) {
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState('all');
+  const [filter, setFilter] = useState(initialFilter || 'all');
   const [leadFilter, setLeadFilter] = useState('all');
   const [editing, setEditing] = useState(null);
   const [editingPayment, setEditingPayment] = useState(null);
@@ -687,6 +748,8 @@ export default function B2CTab({ rows, focusId, range, addingWalkIn = false, onA
     setLeadFilter('all');
     requestAnimationFrame(() => document.getElementById(`b2c-${focusId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
   }, [focusId]);
+
+  useEffect(() => { if (initialFilter) setFilter(initialFilter); }, [initialFilter]);
 
   const counts = useMemo(() => {
     return Object.fromEntries(

@@ -1439,3 +1439,13 @@ textarea.form-input { resize: vertical; min-height: 80px; }
   margin-top: 6px;
 }
 
+
+/* Pickup -> store receipt */
+.ops-tile-btn { appearance: none; font: inherit; text-align: left; cursor: pointer; width: 100%; }
+.ops-tile-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08); }
+.ops-sub-bad { color: var(--red); font-weight: 700; }
+.ops-sub-warn { color: #d97706; font-weight: 700; }
+.ops-receipt-summary { margin: 12px 2px 0; font-size: 14px; color: var(--ink-soft); }
+.ops-receipt { margin: 6px 0; padding: 8px 10px; border: 1px dashed #cbd5e1; border-radius: 10px; }
+.ops-receipt-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.ops-receipt-form { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }

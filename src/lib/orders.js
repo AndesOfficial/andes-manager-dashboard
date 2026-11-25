@@ -386,6 +386,24 @@ export function getOrderDelay(order, referenceDay = istDay(new Date())) {
   return diffDays > 0 ? diffDays : 0;
 }
 
+/** Statuses that mean the rider has collected the bags (or the order is further along). */
+const PICKED_STATUSES = new Set([
+  'order picked up', 'picked up', 'picked_up', 'reached laundry facility', 'reached_laundry', 'processing',
+  'ready for delivery', 'delivery partner on the way', 'out for delivery',
+  'delivered', 'delivered_at_next_door', 'completed',
+]);
+export const hasBeenPickedUp = (status) => PICKED_STATUSES.has(String(status || '').toLowerCase().trim());
+
+/** Bags the rider recorded at pickup: the intake bags, else the bags on the order. */
+function pickedBagCount(order) {
+  const ids = (a) => (Array.isArray(a) ? a.filter(Boolean) : []);
+  const intake = ids(order.receivedJuteBagIds);
+  if (intake.length) return intake.length;
+  const onOrder = ids(order.juteBagIds);
+  if (onOrder.length) return onOrder.length;
+  return Array.isArray(order.bags) ? order.bags.length : 0;
+}
+
 /** Normalizes payment info from cartdetails + manager overrides */
 export function getPaymentInfo(order, verification) {
   const vPay = verification?.payment;
@@ -463,6 +481,13 @@ export function buildB2cRow(order, verification, categories, referenceDay = istD
     null;
   const riderPhone = safeString(rawRiderPhone);
 
+  // Pickup -> store receipt: what the rider collected against what the store counted.
+  const pickedUp = hasBeenPickedUp(order.status) && !isCancelledOrder(order);
+  const pickedBags = pickedUp ? pickedBagCount(order) : 0;
+  const receipt = v.storeReceipt && Number.isFinite(Number(v.storeReceipt.bags)) ? v.storeReceipt : null;
+  const bagDiff = receipt && pickedBags > 0 ? Number(receipt.bags) - pickedBags : 0;
+  const receiptState = !pickedUp ? 'none' : !receipt ? 'pending' : bagDiff < 0 ? 'short' : bagDiff > 0 ? 'extra' : 'ok';
+
   const pickupSlot = safeString(order.pickupSlot) || (typeof order.pickupTime === 'string' ? order.pickupTime.trim() : null);
   const dropSlot = safeString(order.dropSlot) || (typeof order.dropTime === 'string' ? order.dropTime.trim() : (typeof order.deliveryTime === 'string' ? order.deliveryTime.trim() : null));
 
@@ -482,6 +507,11 @@ export function buildB2cRow(order, verification, categories, referenceDay = istD
     delayedDays,
     isDelayed,
     isDelivered,
+    pickedUp,
+    pickedBags,
+    receipt,
+    bagDiff,
+    receiptState,
     payment,
     customer: String(order.customerName || order.userName || order.name || 'Customer').trim(),
     phone: String(order.userMobile || order.customerNumber || order.phoneNumber || ''),
@@ -1025,6 +1055,28 @@ export function b2bTotals(entries) {
     verified: live.filter((e) => e.status === 'verified').length,
     totalRevenue,
     hostel99Revenue: Math.round(hostel99Revenue),
+  };
+}
+
+/**
+ * Pickup -> store receipt and delivery numbers for [from, to]. Each order is
+ * counted once, however many attempts the rider made. Rewashes are left out.
+ */
+export function receiptTotals(rows, range) {
+  const inRange = (d) => !!d && d >= range.from && d <= range.to;
+  const live = rows.filter((r) => r.status !== 'cancelled' && !r.rewash?.isRewash);
+  const picked = live.filter((r) => r.pickedUp && inRange(r.pickupDay));
+  const received = picked.filter((r) => r.receipt);
+  const awaiting = picked.filter((r) => !r.receipt);
+  const mismatched = received.filter((r) => r.bagDiff !== 0);
+  const missingBags = mismatched.reduce((t, r) => t + (r.bagDiff < 0 ? -r.bagDiff : 0), 0);
+  const delivered = live.filter((r) => r.isDelivered && inRange(r.dropDay || r.pickupDay));
+  const inScope = live.filter((r) => inRange(r.pickupDay) || inRange(r.dropDay));
+  const collected = Math.round(inScope.filter((r) => r.payment.isPaid).reduce((t, r) => t + (r.payment.amount || 0), 0));
+  const due = Math.round(inScope.filter((r) => !r.payment.isPaid).reduce((t, r) => t + (r.payment.amount || 0), 0));
+  return {
+    pickedUp: picked.length, received: received.length, awaiting: awaiting.length,
+    mismatched: mismatched.length, missingBags, delivered: delivered.length, collected, due,
   };
 }
 

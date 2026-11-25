@@ -274,6 +274,38 @@ export async function saveB2cVerification(row, action, { lines, reason = '', cha
 }
 
 /**
+ * Store receipt for a picked-up B2C order: how many bags the store counted.
+ * Kept next to the rider's count so a difference shows. Changing a count that
+ * is already saved needs a reason; the old and new values stay in the history.
+ */
+export async function saveStoreReceipt(row, bags, reason = '') {
+  const n = Math.round(Number(bags));
+  if (!Number.isFinite(n) || n < 0 || n > 50) throw new Error('Enter the number of bags received (0 to 50).');
+  const ref = doc(verCol, row.id);
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    const cur = snap.exists() ? snap.data() : {};
+    const prev = cur.storeReceipt || null;
+    if (prev && Number(prev.bags) !== n && !String(reason).trim()) throw new Error('Enter why the count is being changed.');
+    const picked = row.pickedBags || 0;
+    const entry = prev
+      ? historyEntry('receipt_changed', `${String(reason).trim() || 'Re-confirmed'} (store count ${prev.bags} → ${n})`,
+        [{ field: 'storeReceipt.bags', from: prev.bags, to: n }])
+      : historyEntry('receipt_confirmed', `Store received ${n} of ${picked} bag${picked === 1 ? '' : 's'}`);
+    tx.set(ref, {
+      source: 'b2c',
+      orderId: row.id,
+      pickupDate: cur.pickupDate || row.pickupDay,
+      customer: cur.customer || row.customer,
+      storeReceipt: { bags: n, pickedBags: picked, at: new Date().toISOString(), by: actor() },
+      history: [...(cur.history || []), entry],
+      updatedAt: serverTimestamp(),
+      updatedBy: actor(),
+    }, { merge: true });
+  });
+}
+
+/**
  * Marks / unmarks a B2C order as priority (adminSetOrderPriority callable):
  * the rider app shows it first, the customer gets a push and a pop-up.
  * Only open pickups and drops (server checks).

@@ -33,6 +33,7 @@ export default function App() {
   const [tab, setTab] = useState('overview');
   const [range, setRange] = useState(() => ({ from: todayStr(), to: todayStr() }));
   const [focusId, setFocusId] = useState(null);
+  const [b2cFilter, setB2cFilter] = useState('all');
   const [adding, setAdding] = useState(false);
   const [addingWalkIn, setAddingWalkIn] = useState(false);
   const [hostels, setHostels] = useState([]);
@@ -58,7 +59,7 @@ export default function App() {
   /* B2B client names */
   useEffect(() => (canUseApp ? subscribeHostels(setHostels) : undefined), [canUseApp]);
 
-  const go = (t, id = null) => { setTab(t); setFocusId(id); };
+  const go = (t, id = null, filter = 'all') => { setTab(t); setFocusId(id); setB2cFilter(filter); };
 
   const handleSignIn = async (e) => {
     e.preventDefault();
@@ -203,7 +204,7 @@ export default function App() {
             {isDayTab && data.loading ? (
               <div className="loading-state"><Loader2 size={22} className="spin" /><span>Loading {rangeLabel(range)}…</span></div>
             ) : tab === 'overview' ? (
-              <OverviewTab b2c={data.b2c} b2bSum={data.b2bSum} onGo={go} />
+              <OverviewTab b2c={data.b2c} b2bSum={data.b2bSum} rows={data.b2cRows} range={range} onGo={go} />
             ) : tab === 'b2b' ? (
               <B2BTab range={range} entries={data.b2bEntries} clients={hostels} adding={adding} onAddClose={() => setAdding(false)} />
             ) : tab === 'b2c' ? (
@@ -211,6 +212,7 @@ export default function App() {
                 rows={data.b2cRows}
                 focusId={focusId}
                 range={range}
+                initialFilter={b2cFilter}
                 addingWalkIn={addingWalkIn}
                 onAddWalkInClose={() => setAddingWalkIn(false)}
               />
