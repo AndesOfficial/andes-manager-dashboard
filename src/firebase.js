@@ -695,6 +695,16 @@ export async function fetchStoreB2bReference(from, to) {
   return Object.values(byClient).sort((a, b) => a.client.localeCompare(b.client));
 }
 
+/* ---- B2B properties added by admin (`b2bProperties`): name, area, location ---- */
+
+export function subscribeB2bProperties(callback) {
+  return onSnapshot(collection(db, 'b2bProperties'), (snap) => {
+    callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+      .filter((p) => p.active !== false && p.name)
+      .sort((a, b) => String(a.area || '').localeCompare(String(b.area || '')) || a.name.localeCompare(b.name)));
+  }, () => callback([]));
+}
+
 /* ---- hostel names from b2b_partner ---- */
 
 const b2bPartnerCol = collection(db, 'b2b_partner');

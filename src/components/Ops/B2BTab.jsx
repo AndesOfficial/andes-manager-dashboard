@@ -66,11 +66,21 @@ export function getClientCatalogue(clientName) {
 }
 
 /** Add (entry = null) or correct an existing B2B entry. */
-function EntrySheet({ entry, defaultDate, clients, onClose, onDelete }) {
+const datesBetween = (from, to) => {
+  const out = [];
+  const end = new Date(`${to}T00:00:00Z`);
+  for (let d = new Date(`${from}T00:00:00Z`); d <= end; d.setUTCDate(d.getUTCDate() + 1)) out.push(d.toISOString().slice(0, 10));
+  return out;
+};
+const MAX_RANGE_DAYS = 62;
+
+function EntrySheet({ entry, defaultDate, defaultClient, clients, properties = [], onClose, onDelete }) {
   const isEdit = !!entry;
+  const areaOf = useMemo(() => Object.fromEntries(properties.map((p) => [p.name, p.area || ''])), [properties]);
   const [form, setForm] = useState(() => entry
     ? { ...entry, items: entry.items || [], students: entry.students ?? '', photoUrl: entry.photoUrl || '' }
-    : { client: clients[0] || '', date: defaultDate, batchNo: '1', kg: '', clothes: '', students: '', photoUrl: '', items: [], note: '' });
+    : { client: defaultClient || clients[0] || '', date: defaultDate, batchNo: '1', kg: '', clothes: '', students: '', photoUrl: '', items: [], note: '',
+        isRange: false, to: defaultDate, skipSundays: false });
   const [photoFile, setPhotoFile] = useState(null);
   const [photoPreview, setPhotoPreview] = useState(() => entry?.photoUrl || '');
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
@@ -146,6 +156,14 @@ function EntrySheet({ entry, defaultDate, clients, onClose, onDelete }) {
       setError('Enter the KG or the clothes count.'); return;
     }
 
+    let rangeDates = [form.date];
+    if (!isEdit && form.isRange) {
+      if (!form.to || form.to < form.date) { setError('Pick a valid range (From must be on or before To).'); return; }
+      rangeDates = datesBetween(form.date, form.to).filter((d) => !form.skipSundays || new Date(`${d}T00:00:00Z`).getUTCDay() !== 0);
+      if (rangeDates.length > MAX_RANGE_DAYS) { setError(`A range can cover at most ${MAX_RANGE_DAYS} days.`); return; }
+      if (rangeDates.length > 1 && !window.confirm(`Add ${rangeDates.length} entries for ${form.client} (${rangeDates[0]} to ${rangeDates[rangeDates.length - 1]})?`)) return;
+    }
+
     setSaving(true);
     let photoUrl = form.photoUrl || '';
     if (photoFile) {
@@ -191,7 +209,15 @@ function EntrySheet({ entry, defaultDate, clients, onClose, onDelete }) {
 
         await updateB2bEntry(entry.id, 'edit', { patch: clean, reason: reason.trim() || 'Updated by manager', changes });
       } else {
-        await addB2bEntry({ ...clean, client: form.client.trim(), batchNo: String(form.batchNo || '1').trim(), date: form.date });
+        let skipped = 0;
+        for (const date of rangeDates) {
+          try {
+            await addB2bEntry({ ...clean, client: form.client.trim(), batchNo: String(form.batchNo || '1').trim(), date });
+          } catch (err) {
+            if (rangeDates.length > 1 && /already entered/.test(err.message)) skipped += 1; else throw err;
+          }
+        }
+        if (skipped) alert(`${skipped} day${skipped === 1 ? ' was' : 's were'} already entered and skipped.`);
       }
       onClose();
     } catch (err) { setError(err.message); setSaving(false); }
@@ -200,15 +226,40 @@ function EntrySheet({ entry, defaultDate, clients, onClose, onDelete }) {
   return (
     <Sheet title={isEdit ? `Edit ${entry.client}` : 'New B2B entry'} onClose={onClose}>
       <form onSubmit={submit}>
-        <div className="form-row">
-          <label className="form-label">Date</label>
-          <input className="form-input" type="date" value={form.date} max={todayStr()} onChange={(e) => set('date', e.target.value)} />
+        {!isEdit && (
+          <div className="form-row">
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600 }}>
+              <input type="checkbox" checked={!!form.isRange} onChange={(e) => set('isRange', e.target.checked)} />
+              Add for a date range
+            </label>
+          </div>
+        )}
+        <div className={`form-row ${!isEdit && form.isRange ? 'two-col' : ''}`}>
+          <div>
+            <label className="form-label">{!isEdit && form.isRange ? 'From' : 'Date'}</label>
+            <input className="form-input" type="date" value={form.date} max={todayStr()}
+              onChange={(e) => setForm((f) => ({ ...f, date: e.target.value, to: f.to < e.target.value ? e.target.value : f.to }))} />
+          </div>
+          {!isEdit && form.isRange && (
+            <div>
+              <label className="form-label">To</label>
+              <input className="form-input" type="date" value={form.to} min={form.date} max={todayStr()} onChange={(e) => set('to', e.target.value)} />
+            </div>
+          )}
         </div>
+        {!isEdit && form.isRange && (
+          <div className="form-row">
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <input type="checkbox" checked={!!form.skipSundays} onChange={(e) => set('skipSundays', e.target.checked)} />
+              Skip Sundays
+            </label>
+          </div>
+        )}
         <div className="form-row two-col">
           <div>
-            <label className="form-label">Client</label>
+            <label className="form-label">Client / property</label>
             <select className="form-input" value={form.client} onChange={(e) => set('client', e.target.value)}>
-              {clients.map((c) => <option key={c} value={c}>{c}</option>)}
+              {clients.map((c) => <option key={c} value={c}>{areaOf[c] ? `${c} · ${areaOf[c]}` : c}</option>)}
             </select>
           </div>
           <div>
@@ -495,7 +546,35 @@ function StoreReference({ range, entries }) {
   );
 }
 
-export default function B2BTab({ range, entries, clients, adding, onAddClose }) {
+/** The day's B2B properties (added by admin), grouped by area. Tap one to enter its order. */
+function PropertiesForDay({ date, properties, entries, onPick }) {
+  const done = useMemo(() => new Set(entries.filter((e) => e.date === date && e.status !== 'cancelled').map((e) => e.client)), [entries, date]);
+  if (!properties.length) return null;
+  const byArea = {};
+  properties.forEach((p) => { (byArea[p.area || 'No area'] ||= []).push(p); });
+  const pending = properties.filter((p) => !done.has(p.name)).length;
+  return (
+    <div className="panel" style={{ marginBottom: 16 }}>
+      <div className="panel-title">Properties for {fmtDay(date)} · {pending ? `${pending} to enter` : 'all entered'}</div>
+      {Object.entries(byArea).map(([area, list]) => (
+        <div key={area} style={{ marginBottom: 10 }}>
+          <div className="ops-muted" style={{ fontWeight: 700, marginBottom: 4 }}>{area}</div>
+          <div className="chip-row" style={{ flexWrap: 'wrap' }}>
+            {list.map((p) => (
+              <button key={p.id} type="button" className={`chip ${done.has(p.name) ? 'chip-active' : ''}`}
+                title={p.location || ''} onClick={() => onPick(p)}>
+                {done.has(p.name) ? '✓ ' : <Plus size={11} />} {p.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export default function B2BTab({ range, entries, clients, properties = [], adding, onAddClose }) {
+  const [pickedClient, setPickedClient] = useState(null);
   const [filter, setFilter] = useState('all');
   const [editing, setEditing] = useState(null);
   const [cancelling, setCancelling] = useState(null);
@@ -504,10 +583,11 @@ export default function B2BTab({ range, entries, clients, adding, onAddClose }) 
 
   const clientList = useMemo(() => Array.from(new Set([
     ...(clients || []),
+    ...properties.map((p) => p.name),
     'One 8',
     'Zolo stays',
     ...entries.map((e) => e.client),
-  ])).filter(Boolean).sort(), [clients, entries]);
+  ])).filter(Boolean).sort(), [clients, properties, entries]);
 
   const h99CountsByDate = useMemo(() => {
     const counts = {};
@@ -567,6 +647,8 @@ export default function B2BTab({ range, entries, clients, adding, onAddClose }) 
         </div>
       </div>
 
+      <PropertiesForDay date={range.to} properties={properties} entries={entries} onPick={(p) => setPickedClient(p.name)} />
+
       <div className="chip-row scroll">
         {STATUS_FILTERS.map((f) => (
           <button key={f.id} className={`chip ${filter === f.id ? 'chip-active' : ''}`} onClick={() => setFilter(f.id)}>{f.label} ({counts[f.id]})</button>
@@ -594,9 +676,9 @@ export default function B2BTab({ range, entries, clients, adding, onAddClose }) 
 
       <StoreReference range={range} entries={entries} />
 
-      {(adding || editing) && (
-        <EntrySheet entry={editing} defaultDate={range.to} clients={clientList}
-          onClose={() => { setEditing(null); onAddClose(); }} onDelete={setDeleting} />
+      {(adding || editing || pickedClient) && (
+        <EntrySheet entry={editing} defaultDate={range.to} defaultClient={pickedClient} clients={clientList} properties={properties}
+          onClose={() => { setEditing(null); setPickedClient(null); onAddClose(); }} onDelete={setDeleting} />
       )}
       {cancelling && (
         <ReasonSheet title={`Cancel ${cancelling.client} batch ${cancelling.batchNo}`} confirmLabel="Cancel entry"

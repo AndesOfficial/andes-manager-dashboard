@@ -12,7 +12,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 import { RangeBar, todayStr, rangeLabel } from './components/Ops/shared';
 import useRangeData from './hooks/useDayData';
 import {
-  subscribeHostels, subscribeAuth, signIn, signOut, isAllowedUser, isManagerUser,
+  subscribeHostels, subscribeB2bProperties, subscribeAuth, signIn, signOut, isAllowedUser, isManagerUser,
 } from './firebase';
 
 const TABS = [
@@ -37,6 +37,7 @@ export default function App() {
   const [adding, setAdding] = useState(false);
   const [addingWalkIn, setAddingWalkIn] = useState(false);
   const [hostels, setHostels] = useState([]);
+  const [properties, setProperties] = useState([]);
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
@@ -58,6 +59,7 @@ export default function App() {
 
   /* B2B client names */
   useEffect(() => (canUseApp ? subscribeHostels(setHostels) : undefined), [canUseApp]);
+  useEffect(() => (canUseApp ? subscribeB2bProperties(setProperties) : undefined), [canUseApp]);
 
   const go = (t, id = null, filter = 'all') => { setTab(t); setFocusId(id); setB2cFilter(filter); };
 
@@ -208,7 +210,7 @@ export default function App() {
             ) : tab === 'overview' ? (
               <OverviewTab b2c={data.b2c} b2bSum={data.b2bSum} rows={data.b2cRows} range={range} onGo={go} />
             ) : tab === 'b2b' ? (
-              <B2BTab range={range} entries={data.b2bEntries} clients={hostels} adding={adding} onAddClose={() => setAdding(false)} />
+              <B2BTab range={range} entries={data.b2bEntries} clients={hostels} properties={properties} adding={adding} onAddClose={() => setAdding(false)} />
             ) : tab === 'b2c' ? (
               <B2CTab
                 rows={data.b2cRows}
